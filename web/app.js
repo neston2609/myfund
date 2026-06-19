@@ -1,294 +1,640 @@
-const STORAGE_KEY = "myfund-holdings-v2";
-const API_DATA_URL = "/api/data";
-const API_HOLDINGS_URL = "/api/holdings";
+'use strict';
 
-const navFormat = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 4,
-  maximumFractionDigits: 4,
-});
+// ── Constants ──────────────────────────────────────────────────────────────
+const API_DATA     = '/api/data';
+const API_HOLDINGS = '/api/holdings';
+const API_FUNDS    = '/api/funds';
+const API_NAV      = '/api/refresh-nav';
+const LS_KEY       = 'myfund_settings_v1';
 
-const moneyFormat = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const PALETTE = ['#f97316','#0ea5e9','#22c55e','#ec4899','#a855f7','#eab308','#06b6d4','#ef4444'];
+const THEMES  = {
+  coral:  { accent:'#ff6b5e', accent2:'#ffa94d' },
+  lagoon: { accent:'#14b8a6', accent2:'#38bdf8' },
+  grape:  { accent:'#8b5cf6', accent2:'#ec4899'  },
+};
 
-const pctFormat = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-  style: "percent",
-});
+// ── State ──────────────────────────────────────────────────────────────────
+const S = {
+  funds:    [],   // server fund objects: { code, nameTh, nav, navDateDisplay, holdYears, sourceUrl }
+  holdings: [],   // server holding objects: { id, purchaseYear, code, cost, units, ... }
+  theme:    'grape',
+  apiBase:  '',   // custom NAV source (optional override)
+  navUpdatedAt: null,
+  loading:  false,
+  toast:    null,
+  toastTimer: null,
+  modal:    null, // { kind:'holding'|'fund'|'settings', editId:null|string }
+  form:     {},
+};
 
-const dateTimeFormat = new Intl.DateTimeFormat("th-TH", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+// ── Formatters ────────────────────────────────────────────────────────────
+const fmtMoney = new Intl.NumberFormat('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+const fmtNav4  = new Intl.NumberFormat('en-US', { minimumFractionDigits:4, maximumFractionDigits:4 });
+const fmtPct   = (v) => (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
+const fmt      = (n) => 'THB ' + fmtMoney.format(n || 0);
+const fmt4     = (n) => fmtNav4.format(n || 0);
+const esc      = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-let data = null;
-let fundsByCode = new Map();
-let holdings = [];
-let apiEnabled = false;
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function colorOf(code) {
+  const idx = S.funds.findIndex(f => f.code === code);
+  return PALETTE[idx >= 0 ? idx % PALETTE.length : 0];
 }
 
-function numberValue(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function formatMoney(value) {
-  return Number.isFinite(value) ? moneyFormat.format(value) : "-";
-}
-
-function formatNav(value) {
-  return Number.isFinite(value) ? navFormat.format(value) : "-";
-}
-
-function formatPct(value) {
-  return Number.isFinite(value) ? pctFormat.format(value) : "-";
-}
-
-function maturityStatus(purchaseYear, holdYears) {
-  const maturityYear = numberValue(purchaseYear) + numberValue(holdYears);
-  const currentYear = new Date().getFullYear();
-  if (currentYear >= maturityYear) return `ครบกำหนด (${maturityYear})`;
-  return `ยังไม่ครบกำหนด (ครบกำหนดปี ${maturityYear})`;
-}
-
-function calculateHolding(rawHolding) {
-  const fund = fundsByCode.get(rawHolding.code);
-  const purchaseYear = numberValue(rawHolding.purchaseYear);
-  const cost = numberValue(rawHolding.cost);
-  const units = numberValue(rawHolding.units);
-  const holdYears = numberValue(rawHolding.holdYears ?? fund?.holdYears ?? 0);
-  const nav = numberValue(fund?.nav ?? rawHolding.nav);
-  const currentValue = units * nav;
-  const gain = currentValue - cost;
-
-  return {
-    ...rawHolding,
-    purchaseYear,
-    cost,
-    units,
-    holdYears,
-    nav,
-    currentValue,
-    gain,
-    gainPct: cost ? gain / cost : 0,
-    maturityYear: purchaseYear + holdYears,
-    status: maturityStatus(purchaseYear, holdYears),
-    navDateDisplay: fund?.navDateDisplay ?? "",
-    nameTh: fund?.nameTh ?? "",
-  };
-}
-
-function normalizeHolding(holding) {
-  return {
-    id: holding.id ?? `web-${Date.now()}`,
-    source: "web",
-    purchaseYear: numberValue(holding.purchaseYear),
-    code: String(holding.code ?? ""),
-    cost: numberValue(holding.cost),
-    units: numberValue(holding.units),
-    holdYears: numberValue(holding.holdYears),
-  };
-}
-
-function readStoredHoldings() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
+// ── Settings persistence ───────────────────────────────────────────────────
+function loadSettings() {
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    if (s.theme && THEMES[s.theme]) S.theme = s.theme;
+    if (s.apiBase) S.apiBase = s.apiBase;
+    if (s.navUpdatedAt) S.navUpdatedAt = s.navUpdatedAt;
+  } catch {}
+}
+function saveSettings() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      theme: S.theme, apiBase: S.apiBase, navUpdatedAt: S.navUpdatedAt
+    }));
+  } catch {}
 }
 
-function setSaveState(message) {
-  document.getElementById("save-state").textContent = message;
+// ── Toast ─────────────────────────────────────────────────────────────────
+function toast(msg, ms = 3200) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(S.toastTimer);
+  S.toastTimer = setTimeout(() => { el.style.display = 'none'; }, ms);
 }
 
-async function persistHoldings() {
-  holdings = holdings.map(normalizeHolding);
-  if (apiEnabled) {
-    const response = await fetch(API_HOLDINGS_URL, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ holdings }),
-    });
-    if (!response.ok) {
-      throw new Error(`บันทึกไม่สำเร็จ (${response.status})`);
-    }
-    data = await response.json();
-    fundsByCode = new Map((data.funds ?? []).map((fund) => [fund.code, fund]));
-    holdings = (data.holdings ?? []).map(normalizeHolding);
-    setSaveState("บันทึกลงเว็บไซต์แล้ว");
-    return;
-  }
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(holdings));
-  setSaveState("บันทึกไว้ใน browser นี้แล้ว");
-}
-
-function seedHoldings() {
-  const fallback = apiEnabled ? null : readStoredHoldings();
-  holdings = (fallback ?? data.holdings ?? []).map(normalizeHolding);
-  setSaveState(apiEnabled ? "บันทึกข้อมูลผ่านเว็บไซต์" : "บันทึกข้อมูลใน browser นี้");
-}
-
-function renderFundOptions() {
-  const select = document.getElementById("fund-code");
-  select.innerHTML = "";
-  for (const fund of data.funds ?? []) {
-    const option = document.createElement("option");
-    option.value = fund.code;
-    option.textContent = `${fund.code} - NAV ${formatNav(fund.nav)}`;
-    select.appendChild(option);
-  }
-  select.addEventListener("change", () => {
-    const fund = fundsByCode.get(select.value);
-    if (fund?.holdYears != null) {
-      document.getElementById("hold-years").value = fund.holdYears;
-    }
+// ── Theme ─────────────────────────────────────────────────────────────────
+function applyTheme(name) {
+  S.theme = name || 'grape';
+  document.body.className = 'theme-' + S.theme;
+  document.querySelectorAll('.theme-dot').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === S.theme);
   });
+  saveSettings();
 }
 
-function renderMetrics(calculated) {
-  const total = calculated.reduce(
-    (acc, holding) => {
-      acc.cost += holding.cost;
-      acc.currentValue += holding.currentValue;
-      acc.gain += holding.gain;
-      return acc;
-    },
-    { cost: 0, currentValue: 0, gain: 0 },
-  );
+function renderThemeSwitcher() {
+  const el = document.getElementById('theme-switcher');
+  el.innerHTML = Object.keys(THEMES).map(k =>
+    `<button class="theme-dot${S.theme===k?' active':''}" data-theme="${k}" title="${k}"
+      style="background:${THEMES[k].accent};" onclick="applyTheme('${k}')"></button>`
+  ).join('');
+}
+window.applyTheme = applyTheme;
 
-  const latestDate = (data.funds ?? [])
-    .map((fund) => fund.navDateDisplay)
-    .filter(Boolean)
-    .sort()
-    .at(-1) ?? "-";
-
-  document.getElementById("total-value").textContent = formatMoney(total.currentValue);
-  document.getElementById("total-gain").textContent = formatMoney(total.gain);
-  document.getElementById("total-gain").className = total.gain >= 0 ? "positive" : "negative";
-  document.getElementById("latest-nav-date").textContent = latestDate;
+// ── API Helpers ────────────────────────────────────────────────────────────
+async function apiFetch(url, opts = {}) {
+  const r = await fetch(url, { ...opts, headers: { 'content-type': 'application/json', ...(opts.headers || {}) } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
 }
 
-function renderTable() {
-  const calculated = holdings.map(calculateHolding);
-  const tbody = document.getElementById("holding-table");
-  tbody.innerHTML = "";
+// Refresh NAV: uses server endpoint (Finnomena) by default;
+// falls back to client-side fetch if user set a custom apiBase.
+async function doRefreshNav() {
+  if (S.loading) return;
+  S.loading = true;
+  const btn = document.getElementById('btn-refresh-nav');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinning">⟳</span> กำลังอัปเดต…';
 
-  if (!calculated.length) {
-    tbody.innerHTML = '<tr><td colspan="10">ยังไม่มีข้อมูล</td></tr>';
-    renderMetrics(calculated);
-    return;
-  }
-
-  for (const holding of calculated) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${holding.purchaseYear}</td>
-      <td>
-        <strong>${escapeHtml(holding.code)}</strong>
-        <span>${escapeHtml(holding.nameTh)}</span>
-      </td>
-      <td>${formatMoney(holding.cost)}</td>
-      <td>${formatNav(holding.units)}</td>
-      <td>
-        ${formatNav(holding.nav)}
-        <span>${escapeHtml(holding.navDateDisplay)}</span>
-      </td>
-      <td>${formatMoney(holding.currentValue)}</td>
-      <td class="${holding.gain >= 0 ? "positive" : "negative"}">${formatMoney(holding.gain)}</td>
-      <td class="${holding.gain >= 0 ? "positive" : "negative"}">${formatPct(holding.gainPct)}</td>
-      <td>${escapeHtml(holding.status)}</td>
-      <td><button class="icon-button" type="button" data-delete="${escapeHtml(holding.id)}">ลบ</button></td>
-    `;
-    tbody.appendChild(tr);
-  }
-
-  tbody.querySelectorAll("[data-delete]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      holdings = holdings.filter((holding) => holding.id !== button.dataset.delete);
-      try {
-        await persistHoldings();
-        renderTable();
-      } catch (error) {
-        setSaveState(error.message);
+  try {
+    if (S.apiBase) {
+      // Client-side: fetch each fund from custom apiBase
+      const updated = await Promise.all(S.funds.map(async f => {
+        try {
+          const url = S.apiBase.replace('{code}', encodeURIComponent(f.code));
+          const j = await fetch(url).then(r => r.json());
+          const v = j?.nav ?? j?.last_val ?? null;
+          if (v !== null && !isNaN(Number(v))) return { ...f, nav: Number(v) };
+        } catch {}
+        return f;
+      }));
+      // Persist funds to server
+      const data = await apiFetch(API_FUNDS, { method:'PUT', body: JSON.stringify({ funds: updated }) });
+      ingestData(data);
+      S.navUpdatedAt = Date.now();
+      saveSettings();
+      toast('✓ อัปเดต NAV แล้ว · NAV updated');
+    } else {
+      // Server-side: Finnomena fetch
+      const data = await apiFetch(API_NAV, { method:'POST', body:'{}' });
+      ingestData(data);
+      S.navUpdatedAt = Date.now();
+      saveSettings();
+      const errors = data.navRefreshErrors || [];
+      if (errors.length) {
+        toast(`✓ อัปเดต NAV แล้ว · บางกองทุนดึงไม่ได้: ${errors.map(e=>e.code).join(', ')}`, 5000);
+      } else {
+        toast('✓ อัปเดต NAV ทุกกองทุนแล้ว · All NAV updated');
       }
-    });
-  });
-
-  renderMetrics(calculated);
-}
-
-function fillDefaultForm() {
-  const firstFund = data.funds?.[0];
-  document.getElementById("purchase-year").value = new Date().getFullYear();
-  document.getElementById("fund-code").value = firstFund?.code ?? "";
-  document.getElementById("cost").value = "";
-  document.getElementById("units").value = "";
-  document.getElementById("hold-years").value = firstFund?.holdYears ?? 10;
-}
-
-function bindForm() {
-  document.getElementById("holding-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    holdings.push({
-      id: `web-${Date.now()}`,
-      source: "web",
-      purchaseYear: Number(form.get("purchaseYear")),
-      code: String(form.get("code")),
-      cost: Number(form.get("cost")),
-      units: Number(form.get("units")),
-      holdYears: Number(form.get("holdYears")),
-    });
-    try {
-      await persistHoldings();
-      renderTable();
-      event.currentTarget.reset();
-      fillDefaultForm();
-    } catch (error) {
-      holdings.pop();
-      setSaveState(error.message);
     }
-  });
-}
-
-async function loadData() {
-  try {
-    const response = await fetch(API_DATA_URL, { cache: "no-store" });
-    if (!response.ok) throw new Error("API unavailable");
-    apiEnabled = true;
-    return response.json();
-  } catch {
-    apiEnabled = false;
-    const response = await fetch("data.json", { cache: "no-store" });
-    return response.json();
+  } catch (err) {
+    toast('ดึง NAV ไม่สำเร็จ · ' + err.message);
   }
+
+  S.loading = false;
+  btn.disabled = false;
+  btn.textContent = '↻ อัปเดต NAV';
+  renderAll();
 }
 
-async function load() {
-  data = await loadData();
-  fundsByCode = new Map((data.funds ?? []).map((fund) => [fund.code, fund]));
-  renderFundOptions();
-  seedHoldings();
-  bindForm();
-  fillDefaultForm();
-  renderTable();
+// ── Data ingestion ─────────────────────────────────────────────────────────
+function ingestData(data) {
+  S.funds    = data.funds    ?? [];
+  S.holdings = data.holdings ?? [];
 }
 
-load().catch((error) => {
-  document.getElementById("holding-table").innerHTML = `<tr><td colspan="10">${escapeHtml(error.message)}</td></tr>`;
-});
+// ── Computed values ────────────────────────────────────────────────────────
+function computePortfolio() {
+  const cy = new Date().getFullYear();
+  const fundMap = new Map(S.funds.map(f => [f.code, f]));
+
+  let totalCost = 0, totalValue = 0;
+
+  const holdings = S.holdings.map(h => {
+    const f = fundMap.get(h.code) || {};
+    const nav  = Number(f.nav || h.nav || 0);
+    const cost  = Number(h.cost  || 0);
+    const units = Number(h.units || 0);
+    const value = units * nav;
+    const pl    = value - cost;
+    const plPct = cost ? pl / cost : 0;
+    totalCost  += cost;
+    totalValue += value;
+    const termYears   = Number(h.holdYears || f.holdYears || 0);
+    const maturityYear = Number(h.purchaseYear || 0) + termYears;
+    const matured      = cy >= maturityYear;
+    const yearsLeft    = Math.max(0, maturityYear - cy);
+    const lockPct      = termYears ? Math.min(100, Math.max(0, (cy - Number(h.purchaseYear)) / termYears * 100)) : 0;
+
+    return {
+      id: h.id, year: h.purchaseYear, code: h.code, color: colorOf(h.code),
+      cost, units, nav, value, pl, plPct,
+      costStr:  fmt(cost),  unitsStr: fmt4(units),
+      navStr:   fmt4(nav),  valueStr: fmt(value),
+      plStr:    (pl >= 0 ? '+' : '') + fmt(pl),
+      plPctStr: fmtPct(plPct),
+      plColor:  pl >= 0 ? 'var(--pos)' : 'var(--neg)',
+      lockPct, maturityYear, matured, yearsLeft,
+      statusLabel: matured
+        ? `ครบกำหนด Matured · ${maturityYear}`
+        : `ครบปี ${maturityYear} · เหลือ ${yearsLeft} ปี`,
+      statusColor: matured ? 'var(--pos)' : 'var(--muted)',
+    };
+  });
+
+  // Sort newest first
+  holdings.sort((a, b) => b.year - a.year || a.code.localeCompare(b.code));
+
+  const totalPL    = totalValue - totalCost;
+  const totalPLPct = totalCost ? totalPL / totalCost : 0;
+
+  // Fund summaries
+  const funds = S.funds.map(f => {
+    const hs    = S.holdings.filter(h => h.code === f.code);
+    const cost  = hs.reduce((s, h) => s + Number(h.cost  || 0), 0);
+    const units = hs.reduce((s, h) => s + Number(h.units || 0), 0);
+    const value = units * Number(f.nav || 0);
+    const pl    = value - cost;
+    const plPct = cost ? pl / cost : 0;
+    return {
+      code: f.code, type: f.type || 'Fund',
+      color: colorOf(f.code),
+      nav: Number(f.nav || 0), navStr: fmt4(f.nav),
+      termYears: Number(f.holdYears || 0),
+      cost, value, pl, plPct,
+      costStr:  fmt(cost),  valueStr: fmt(value),
+      plStr:    (pl >= 0 ? '+' : '') + fmt(pl),
+      plPctStr: fmtPct(plPct),
+      plColor:  pl >= 0 ? 'var(--pos)' : 'var(--neg)',
+      lots: hs.length,
+    };
+  });
+
+  // Pie chart
+  let acc = 0;
+  const stops = funds.map(f => {
+    const share = totalValue ? f.value / totalValue * 100 : 0;
+    const start = acc; acc += share;
+    return `${f.color} ${start.toFixed(2)}% ${acc.toFixed(2)}%`;
+  });
+  const pieGradient = stops.length
+    ? `conic-gradient(${stops.join(',')})`
+    : 'var(--surface2)';
+
+  // Bar chart by year
+  const byYear = {};
+  S.holdings.forEach(h => {
+    const f = fundMap.get(h.code) || {};
+    const yr = Number(h.purchaseYear);
+    if (!byYear[yr]) byYear[yr] = { year: yr, cost: 0, value: 0 };
+    byYear[yr].cost  += Number(h.cost  || 0);
+    byYear[yr].value += Number(h.units || 0) * Number(f.nav || 0);
+  });
+  const years  = Object.values(byYear).sort((a, b) => a.year - b.year);
+  const maxV   = Math.max(1, ...years.map(y => Math.max(y.cost, y.value)));
+  const yearBars = years.map(y => ({
+    year: y.year, costStr: fmt(y.cost), valueStr: fmt(y.value),
+    costH:  Math.round(y.cost  / maxV * 150),
+    valueH: Math.round(y.value / maxV * 150),
+  }));
+
+  return { holdings, funds, totalCost, totalValue, totalPL, totalPLPct, pieGradient, yearBars };
+}
+
+// ── Render functions ───────────────────────────────────────────────────────
+function renderHero(p) {
+  const sign = p.totalPL >= 0 ? '+' : '';
+  document.getElementById('hero-value').textContent = fmt(p.totalValue);
+  document.getElementById('hero-pl').textContent =
+    `${sign}${fmt(p.totalPL)} · ${sign}${(p.totalPLPct * 100).toFixed(2)}%`;
+  document.getElementById('hero-cost').textContent = `ต้นทุนรวม Cost ${fmt(p.totalCost)}`;
+  document.getElementById('hero-lots').textContent  = S.holdings.length;
+  document.getElementById('hero-funds').textContent = S.funds.length;
+  document.getElementById('hero-nav-status').textContent = S.navUpdatedAt
+    ? 'NAV: ' + new Date(S.navUpdatedAt).toLocaleString('th-TH')
+    : 'ยังไม่ได้อัปเดต NAV · NAV not refreshed yet';
+}
+
+function renderCharts(p) {
+  // Pie
+  document.getElementById('pie-chart').style.background = p.pieGradient;
+  document.getElementById('pie-count').textContent = S.funds.length;
+  const legend = document.getElementById('legend');
+  const totalValue = p.totalValue || 1;
+  legend.innerHTML = p.funds.map(f =>
+    `<div class="legend-item">
+      <span class="legend-dot" style="background:${f.color};"></span>
+      <span class="legend-code">${esc(f.code)}</span>
+      <span class="legend-pct">${(f.value / totalValue * 100).toFixed(1)}%</span>
+    </div>`
+  ).join('');
+
+  // Bar chart
+  const bc = document.getElementById('bar-chart');
+  if (!p.yearBars.length) {
+    bc.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:20px;">ยังไม่มีข้อมูล</div>';
+    return;
+  }
+  bc.innerHTML = p.yearBars.map(y =>
+    `<div class="bar-year">
+      <div class="bar-pair">
+        <div class="bar-cost" title="${y.costStr}"  style="height:${y.costH}px;"></div>
+        <div class="bar-val"  title="${y.valueStr}" style="height:${y.valueH}px;"></div>
+      </div>
+      <div class="bar-label">${y.year}</div>
+    </div>`
+  ).join('');
+}
+
+function renderFundCards(p) {
+  const el = document.getElementById('fund-cards');
+  if (!p.funds.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:14px;">ยังไม่มีกองทุน — กด "+ เพิ่มกองทุน"</div>';
+    return;
+  }
+  el.innerHTML = p.funds.map(f =>
+    `<div class="fund-card">
+      <div class="fund-card-head">
+        <span class="fund-color-dot" style="background:${f.color};"></span>
+        <span class="fund-code" title="${esc(f.code)}">${esc(f.code)}</span>
+        <span class="fund-type-badge">${esc(f.type)}</span>
+      </div>
+      <div class="fund-stats">
+        <div><div class="fund-stat-label">มูลค่า Value</div><div class="fund-stat-val">${f.valueStr}</div></div>
+        <div style="text-align:right;"><div class="fund-stat-label">NAV</div><div class="fund-stat-val">${f.navStr}</div></div>
+      </div>
+      <div class="fund-pl-row">
+        <span class="fund-pl" style="color:${f.plColor};">${f.plStr} <span class="fund-pl-pct">(${f.plPctStr})</span></span>
+        <div class="fund-actions">
+          <button class="btn-ghost" onclick="openFund('${esc(f.code)}')" title="แก้ไข Edit">✎</button>
+          <button class="btn-ghost danger" onclick="deleteFund('${esc(f.code)}')" title="ลบ Delete">✕</button>
+        </div>
+      </div>
+      <div class="fund-meta">${f.lots} lots · ต้นทุน ${f.costStr} · ล็อก ${f.termYears} ปี</div>
+    </div>`
+  ).join('');
+}
+
+function renderHoldingsTable(p) {
+  const el = document.getElementById('holdings-body');
+  if (!p.holdings.length) {
+    el.innerHTML = '<div class="empty-row">ยังไม่มีรายการ — กด "+ เพิ่มรายการซื้อ"</div>';
+    return;
+  }
+  el.innerHTML = p.holdings.map(h =>
+    `<div class="td-row">
+      <div class="td-year">${h.year}</div>
+      <div class="td-fund">
+        <span class="td-fund-dot" style="background:${h.color};"></span>
+        <span class="td-fund-code" title="${esc(h.code)}">${esc(h.code)}</span>
+      </div>
+      <div class="ta-r">${h.costStr}</div>
+      <div class="ta-r" style="color:var(--muted);">${h.unitsStr}</div>
+      <div class="ta-r">${h.navStr}</div>
+      <div class="ta-r" style="font-weight:600;">${h.valueStr}</div>
+      <div class="ta-r td-pl" style="color:${h.plColor};">${h.plStr}<div class="td-pl-pct">${h.plPctStr}</div></div>
+      <div>
+        <div class="maturity-label" style="color:${h.statusColor};">${h.statusLabel}</div>
+        <div class="maturity-bar-bg"><div class="maturity-bar-fill" style="width:${h.lockPct.toFixed(0)}%;"></div></div>
+      </div>
+      <div class="td-actions">
+        <button class="btn-ghost" onclick="openHolding('${esc(h.id)}')" title="แก้ไข Edit">✎</button>
+        <button class="btn-ghost danger" onclick="deleteHolding('${esc(h.id)}')" title="ลบ Delete">✕</button>
+      </div>
+    </div>`
+  ).join('');
+}
+
+function renderAll() {
+  const p = computePortfolio();
+  renderHero(p);
+  renderCharts(p);
+  renderFundCards(p);
+  renderHoldingsTable(p);
+}
+
+// ── Modal helpers ──────────────────────────────────────────────────────────
+function openModal(title, bodyHtml, footHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML  = bodyHtml;
+  document.getElementById('modal-foot').innerHTML  = footHtml;
+  document.getElementById('modal-backdrop').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  S.modal = null;
+  S.form  = {};
+}
+window.closeModal = closeModal;
+
+function getFormValues(ids) {
+  const out = {};
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) out[id] = el.value;
+  });
+  return out;
+}
+
+// ── Holding modal ──────────────────────────────────────────────────────────
+window.openHolding = function(id) {
+  S.modal = { kind: 'holding', editId: id || null };
+  const cy = new Date().getFullYear();
+  let year = cy, code = S.funds[0]?.code || '', cost = '', units = '';
+
+  if (id) {
+    const h = S.holdings.find(x => x.id === id);
+    if (h) { year = h.purchaseYear; code = h.code; cost = h.cost; units = h.units; }
+  }
+
+  const fundOpts = S.funds.map(f => `<option value="${esc(f.code)}"${f.code===code?' selected':''}>${esc(f.code)}</option>`).join('');
+  const title = id ? 'แก้ไขรายการ · Edit holding' : 'เพิ่มรายการซื้อ · Add holding';
+
+  openModal(title,
+    `<div class="field-row">
+      <div class="field"><label>ปีที่ซื้อ · Year</label><input id="f-year" type="number" value="${year}" min="1900" max="2200"></div>
+      <div class="field"><label>กองทุน · Fund</label><select id="f-code">${fundOpts}</select></div>
+    </div>
+    <div class="field"><label>ต้นทุน (บาท) · Cost (THB)</label><input id="f-cost" type="number" value="${cost}" placeholder="70000" min="0" step="0.01"></div>
+    <div class="field"><label>จำนวนหน่วย · Units</label><input id="f-units" type="number" value="${units}" placeholder="7389.3445" min="0" step="0.0001"></div>
+    <div class="field-hint">มูลค่าปัจจุบัน = หน่วย × NAV ของกองทุน · Current value = units × fund NAV.</div>`,
+    `${id ? '<button class="btn-danger" onclick="deleteHoldingFromModal()">ลบ Delete</button>' : ''}
+    <div class="modal-foot-right">
+      <button class="btn-cancel" onclick="closeModal()">ยกเลิก Cancel</button>
+      <button class="btn-save" onclick="saveHolding()">บันทึก Save</button>
+    </div>`
+  );
+};
+window.openHolding = window.openHolding;
+
+window.saveHolding = async function() {
+  const v = getFormValues(['f-year','f-code','f-cost','f-units']);
+  if (!v['f-code'] || !v['f-cost'] || !v['f-units']) { toast('กรอกข้อมูลให้ครบ · Fill all fields'); return; }
+
+  const rec = {
+    id:           S.modal.editId || ('web-' + Date.now()),
+    source:       'web',
+    purchaseYear: parseInt(v['f-year']) || new Date().getFullYear(),
+    code:         v['f-code'],
+    cost:         parseFloat(v['f-cost']) || 0,
+    units:        parseFloat(v['f-units']) || 0,
+  };
+
+  const holdings = S.modal.editId
+    ? S.holdings.map(h => h.id === S.modal.editId ? rec : h)
+    : [...S.holdings, rec];
+
+  try {
+    const data = await apiFetch(API_HOLDINGS, { method:'PUT', body: JSON.stringify({ holdings }) });
+    ingestData(data);
+    closeModal();
+    renderAll();
+    toast(S.modal ? '✓ บันทึกแล้ว Saved' : '✓ เพิ่มรายการแล้ว Added');
+  } catch (err) {
+    toast('บันทึกไม่สำเร็จ · ' + err.message);
+  }
+};
+
+window.deleteHoldingFromModal = function() {
+  if (!confirm('ลบรายการนี้? · Delete this holding?')) return;
+  const id = S.modal.editId;
+  closeModal();
+  deleteHolding(id);
+};
+
+window.deleteHolding = async function(id) {
+  if (!confirm('ลบรายการนี้? · Delete this holding?')) return;
+  const holdings = S.holdings.filter(h => h.id !== id);
+  try {
+    const data = await apiFetch(API_HOLDINGS, { method:'PUT', body: JSON.stringify({ holdings }) });
+    ingestData(data);
+    renderAll();
+    toast('✓ ลบรายการแล้ว Deleted');
+  } catch (err) {
+    toast('ลบไม่สำเร็จ · ' + err.message);
+  }
+};
+
+// ── Fund modal ─────────────────────────────────────────────────────────────
+window.openFund = function(code) {
+  S.modal = { kind: 'fund', editId: code || null };
+  let fcode = '', type = 'SSF', nav = '', termYears = '10';
+
+  if (code) {
+    const f = S.funds.find(x => x.code === code);
+    if (f) { fcode = f.code; type = f.type || 'SSF'; nav = f.nav; termYears = f.holdYears; }
+  }
+
+  const typeOpts = ['SSF','ThaiESG','RMF','Other'].map(t =>
+    `<option value="${t}"${type===t?' selected':''}>${t}</option>`).join('');
+
+  const title = code ? 'แก้ไขกองทุน · Edit fund' : 'เพิ่มกองทุน · Add fund';
+  const readonly = code ? 'readonly style="opacity:.6;cursor:not-allowed;"' : '';
+
+  openModal(title,
+    `<div class="field"><label>ชื่อ/รหัสกองทุน · Fund name/code</label><input id="f-fcode" type="text" value="${esc(fcode)}" placeholder="SCBTP(ThaiESG)" ${readonly}></div>
+    <div class="field-row">
+      <div class="field"><label>ประเภท · Type</label><select id="f-type">${typeOpts}</select></div>
+      <div class="field"><label>ระยะล็อก (ปี) · Term (yrs)</label><input id="f-term" type="number" value="${termYears}" min="0" max="100"></div>
+    </div>
+    <div class="field"><label>NAV ล่าสุด · Current NAV</label><input id="f-nav" type="number" value="${nav}" placeholder="11.3154" step="0.0001"></div>`,
+    `${code ? '<button class="btn-danger" onclick="deleteFundFromModal()">ลบ Delete</button>' : ''}
+    <div class="modal-foot-right">
+      <button class="btn-cancel" onclick="closeModal()">ยกเลิก Cancel</button>
+      <button class="btn-save" onclick="saveFund()">บันทึก Save</button>
+    </div>`
+  );
+};
+
+window.saveFund = async function() {
+  const v = getFormValues(['f-fcode','f-type','f-term','f-nav']);
+  if (!v['f-fcode'] || v['f-nav'] === '') { toast('กรอกชื่อและ NAV · Name & NAV required'); return; }
+
+  const isEdit = !!S.modal.editId;
+  const rec = {
+    code:         v['f-fcode'].trim(),
+    nameTh:       v['f-fcode'].trim(),
+    type:         v['f-type'] || 'SSF',
+    nav:          parseFloat(v['f-nav']) || 0,
+    holdYears:    parseInt(v['f-term']) || 0,
+    navDateDisplay: isEdit ? (S.funds.find(f=>f.code===S.modal.editId)?.navDateDisplay || '') : '',
+    sourceUrl:    `https://www.finnomena.com/fund/${encodeURIComponent(v['f-fcode'].trim())}`,
+  };
+
+  const funds = isEdit
+    ? S.funds.map(f => f.code === S.modal.editId ? { ...f, ...rec, code: f.code } : f)
+    : [...S.funds, rec];
+
+  try {
+    const data = await apiFetch(API_FUNDS, { method:'PUT', body: JSON.stringify({ funds }) });
+    ingestData(data);
+    closeModal();
+    renderAll();
+    toast(isEdit ? '✓ บันทึกแล้ว Saved' : '✓ เพิ่มกองทุนแล้ว Added');
+  } catch (err) {
+    toast('บันทึกไม่สำเร็จ · ' + err.message);
+  }
+};
+
+window.deleteFundFromModal = function() {
+  const code = S.modal.editId;
+  closeModal();
+  deleteFund(code);
+};
+
+window.deleteFund = async function(code) {
+  if (S.holdings.some(h => h.code === code)) {
+    toast('ลบรายการของกองทุนนี้ก่อน · Remove its holdings first');
+    return;
+  }
+  if (!confirm(`ลบกองทุน ${code}? · Delete this fund?`)) return;
+  const funds = S.funds.filter(f => f.code !== code);
+  try {
+    const data = await apiFetch(API_FUNDS, { method:'PUT', body: JSON.stringify({ funds }) });
+    ingestData(data);
+    renderAll();
+    toast('✓ ลบกองทุนแล้ว Fund deleted');
+  } catch (err) {
+    toast('ลบไม่สำเร็จ · ' + err.message);
+  }
+};
+
+// ── Settings modal ─────────────────────────────────────────────────────────
+function openSettings() {
+  S.modal = { kind: 'settings' };
+  openModal('แหล่งข้อมูล NAV · NAV data source',
+    `<div class="field"><label>Custom NAV API URL (optional)</label>
+      <input id="f-apibase" type="text" value="${esc(S.apiBase)}" placeholder="https://your-api.com/nav?fund={code}">
+    </div>
+    <div class="field-hint">
+      ใส่ <b>{code}</b> ตรงตำแหน่งรหัสกองทุน เช่น <code style="background:var(--bg);padding:1px 5px;border-radius:5px;">{"nav": 11.32}</code><br>
+      หากเว้นว่าง จะดึง NAV จาก <b>Finnomena</b> โดยอัตโนมัติผ่าน server<br>
+      Use <b>{code}</b> as fund code placeholder. Leave blank to use built-in Finnomena source.
+    </div>`,
+    `<div class="modal-foot-right">
+      <button class="btn-cancel" onclick="closeModal()">ยกเลิก Cancel</button>
+      <button class="btn-save" onclick="saveSettings2()">บันทึก Save</button>
+    </div>`
+  );
+}
+
+window.saveSettings2 = function() {
+  const v = getFormValues(['f-apibase']);
+  S.apiBase = (v['f-apibase'] || '').trim();
+  saveSettings();
+  closeModal();
+  toast('✓ บันทึกการตั้งค่า Settings saved');
+};
+
+// ── Export CSV ─────────────────────────────────────────────────────────────
+function exportCsv() {
+  const cy = new Date().getFullYear();
+  const fundMap = new Map(S.funds.map(f => [f.code, f]));
+  const head = ['Year','Fund','Type','Cost','Units','NAV','CurrentValue','PL','PLpct','MaturityYear','Status'];
+  const lines = [head.join(',')];
+
+  [...S.holdings].sort((a,b) => b.purchaseYear - a.purchaseYear).forEach(h => {
+    const f     = fundMap.get(h.code) || {};
+    const value = Number(h.units||0) * Number(f.nav||0);
+    const pl    = value - Number(h.cost||0);
+    const plp   = h.cost ? pl / h.cost * 100 : 0;
+    const my    = Number(h.purchaseYear||0) + Number(f.holdYears||h.holdYears||0);
+    lines.push([
+      h.purchaseYear, `"${(f.code||h.code||'')}"`, f.type||'',
+      h.cost, h.units, f.nav||'', value.toFixed(2),
+      pl.toFixed(2), plp.toFixed(2)+'%', my, cy>=my?'Matured':'Locked'
+    ].join(','));
+  });
+
+  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `MyFund_${cy}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast('✓ ส่งออก CSV แล้ว Exported');
+}
+
+// ── Bootstrap ──────────────────────────────────────────────────────────────
+async function init() {
+  loadSettings();
+  applyTheme(S.theme);
+  renderThemeSwitcher();
+
+  // Wire buttons
+  document.getElementById('btn-refresh-nav').addEventListener('click', doRefreshNav);
+  document.getElementById('btn-settings').addEventListener('click', openSettings);
+  document.getElementById('btn-add-holding').addEventListener('click',  () => openHolding(null));
+  document.getElementById('btn-add-holding2').addEventListener('click', () => openHolding(null));
+  document.getElementById('btn-add-fund').addEventListener('click',  () => openFund(null));
+  document.getElementById('btn-export-csv').addEventListener('click', exportCsv);
+
+  // Close modal on backdrop click
+  document.getElementById('modal-backdrop').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('modal-backdrop')) closeModal();
+  });
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+
+  // Load initial data
+  try {
+    const data = await apiFetch(API_DATA);
+    ingestData(data);
+    renderAll();
+  } catch (err) {
+    document.getElementById('holdings-body').innerHTML =
+      `<div class="empty-row">โหลดข้อมูลไม่ได้ · ${err.message}</div>`;
+    return;
+  }
+
+  // Real-time NAV: refresh on every page load
+  doRefreshNav();
+}
+
+init();

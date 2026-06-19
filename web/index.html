@@ -1,88 +1,133 @@
 <!doctype html>
 <html lang="th">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MyFund Portfolio</title>
-    <link rel="stylesheet" href="styles.css">
-  </head>
-  <body>
-    <main class="shell">
-      <section class="topbar">
-        <div>
-          <p class="eyebrow">MyFund</p>
-          <h1>บันทึกและคำนวณกองทุน</h1>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyFund · กองทุนของฉัน</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app" class="app">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-icon">฿</div>
+      <div>
+        <div class="brand-title">MyFund <span class="brand-sub">· กองทุนของฉัน</span></div>
+        <div class="brand-desc">Portfolio dashboard · พอร์ตการลงทุน</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="theme-switcher" id="theme-switcher"></div>
+      <button class="btn-outline" id="btn-refresh-nav">↻ อัปเดต NAV</button>
+      <button class="btn-icon" id="btn-settings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- HERO CARD -->
+  <div class="hero-card" id="hero-card">
+    <div class="hero-left">
+      <div class="hero-label">มูลค่าพอร์ตปัจจุบัน · Total Portfolio Value</div>
+      <div class="hero-value" id="hero-value">—</div>
+      <div class="hero-badges">
+        <span class="badge-primary" id="hero-pl">—</span>
+        <span class="badge-secondary" id="hero-cost">—</span>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div><b id="hero-lots">—</b> รายการ · lots</div>
+      <div><b id="hero-funds">—</b> กองทุน · funds</div>
+      <div class="hero-nav-status" id="hero-nav-status">ยังไม่ได้อัปเดต NAV</div>
+    </div>
+  </div>
+
+  <!-- ACTION BUTTONS -->
+  <div class="action-bar">
+    <button class="btn-primary" id="btn-add-holding">+ เพิ่มรายการซื้อ · Add holding</button>
+    <button class="btn-outline" id="btn-add-fund">+ เพิ่มกองทุน · Add fund</button>
+    <button class="btn-outline" id="btn-export-csv">⤓ Export CSV</button>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-grid" id="charts-section">
+    <div class="card">
+      <div class="card-title">สัดส่วนพอร์ต · Allocation</div>
+      <div class="pie-row">
+        <div class="pie-wrap">
+          <div class="pie" id="pie-chart"></div>
+          <div class="pie-center">
+            <div class="pie-label">Funds</div>
+            <div class="pie-count" id="pie-count">—</div>
+          </div>
         </div>
-      </section>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
 
-      <section class="metrics" aria-label="สรุปพอร์ต">
-        <div>
-          <span>มูลค่าปัจจุบัน</span>
-          <strong id="total-value">-</strong>
+    <div class="card">
+      <div class="card-title">เงินลงทุน vs มูลค่า · Invested vs Value</div>
+      <div class="bar-legend">
+        <span><span class="bar-dot cost-dot"></span>ต้นทุน Cost</span>
+        <span><span class="bar-dot value-dot"></span>มูลค่า Value</span>
+      </div>
+      <div class="bar-chart" id="bar-chart"></div>
+    </div>
+  </div>
+
+  <!-- FUND CARDS -->
+  <div>
+    <div class="section-title">กองทุนของฉัน · My Funds</div>
+    <div class="fund-cards" id="fund-cards"></div>
+  </div>
+
+  <!-- HOLDINGS TABLE -->
+  <div class="card table-card">
+    <div class="table-header">
+      <div class="section-title" style="margin:0;">รายการซื้อ · Holdings</div>
+      <button class="btn-primary btn-sm" id="btn-add-holding2">+ Add</button>
+    </div>
+    <div class="table-scroll">
+      <div class="table-grid">
+        <div class="th-row">
+          <div>ปี Year</div>
+          <div>กองทุน Fund</div>
+          <div class="ta-r">ต้นทุน Cost</div>
+          <div class="ta-r">หน่วย Units</div>
+          <div class="ta-r">NAV</div>
+          <div class="ta-r">มูลค่า Value</div>
+          <div class="ta-r">กำไร/ขาดทุน</div>
+          <div>ครบกำหนด Maturity</div>
+          <div></div>
         </div>
-        <div>
-          <span>กำไร/ขาดทุน</span>
-          <strong id="total-gain">-</strong>
-        </div>
-        <div>
-          <span>อัปเดต NAV ล่าสุด</span>
-          <strong id="latest-nav-date">-</strong>
-        </div>
-      </section>
+        <div id="holdings-body"></div>
+      </div>
+    </div>
+  </div>
 
-      <section class="editor">
-        <form id="holding-form" class="entry-form">
-          <label>
-            ปีที่ซื้อ
-            <input id="purchase-year" name="purchaseYear" type="number" min="1900" max="2200" required>
-          </label>
-          <label>
-            กองทุน
-            <select id="fund-code" name="code" required></select>
-          </label>
-          <label>
-            ต้นทุน
-            <input id="cost" name="cost" type="number" min="0" step="0.01" required>
-          </label>
-          <label>
-            จำนวนหน่วย
-            <input id="units" name="units" type="number" min="0" step="0.0001" required>
-          </label>
-          <label>
-            ปีที่ต้องถือครอง
-            <input id="hold-years" name="holdYears" type="number" min="0" max="100" step="1" required>
-          </label>
-          <button type="submit">บันทึก</button>
-        </form>
+  <div class="footer-note">มูลค่าและกำไร/ขาดทุนคำนวณอัตโนมัติจาก NAV · Value &amp; P/L auto-calculated from NAV. ข้อมูลบันทึกในเซิร์ฟเวอร์ · Data stored on server.</div>
 
-        <p id="save-state" class="save-state">พร้อมบันทึกข้อมูลในเว็บ</p>
-      </section>
+</div>
 
-      <section class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ปีที่ซื้อ</th>
-              <th>กองทุน</th>
-              <th>ต้นทุน</th>
-              <th>จำนวนหน่วย</th>
-              <th>NAV</th>
-              <th>มูลค่าปัจจุบัน</th>
-              <th>กำไร/ขาดทุน</th>
-              <th>กำไร/ขาดทุน %</th>
-              <th>สถานะ</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="holding-table">
-            <tr>
-              <td colspan="10">Loading...</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-    </main>
+<!-- MODAL -->
+<div class="modal-backdrop" id="modal-backdrop" style="display:none;">
+  <div class="modal" id="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modal-title">—</div>
+      <button class="btn-icon" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot" id="modal-foot"></div>
+  </div>
+</div>
 
-    <script src="app.js"></script>
-  </body>
+<!-- TOAST -->
+<div class="toast" id="toast" style="display:none;"></div>
+
+<script src="app.js"></script>
+</body>
 </html>

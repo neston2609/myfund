@@ -20,6 +20,11 @@ function numberValue(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function formatDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(new Date(value));
+}
+
 function maturityStatus(purchaseYear, holdYears, currentYear = new Date().getFullYear()) {
   const maturityYear = numberValue(purchaseYear) + numberValue(holdYears);
   if (currentYear >= maturityYear) return `ครบกำหนด (${maturityYear})`;
@@ -83,8 +88,67 @@ function calculateData(data) {
   return { ...data, holdings, portfolioTotals };
 }
 
+// --- Finnomena NAV fetcher ---
+async function fetchJson(url) {
+  const response = await fetch(url, {
+    headers: { "user-agent": "Mozilla/5.0", accept: "application/json,text/html;q=0.9,*/*;q=0.8" },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+  return response.json();
+}
+
+async function getFinnomenaFundList() {
+  const list = await fetchJson("https://www.finnomena.com/fn3/api/fund/public/list");
+  return Array.isArray(list) ? list : (list.value ?? []);
+}
+
+async function getNavFromFinnomena(code, fundList) {
+  const fund = fundList.find((item) => item.short_code === code);
+  if (!fund) throw new Error(`Fund not found in Finnomena: ${code}`);
+  for (const range of ["1M", "1Y", "MAX"]) {
+    const url = `https://www.finnomena.com/fn3/api/fund/v2/public/funds/nav/q?funds[]=${encodeURIComponent(fund.id)}&range=${range}`;
+    const payload = await fetchJson(url);
+    const record = payload.data?.find((item) => item.fund_id === fund.id);
+    const latest = record?.navs?.at(-1);
+    if (latest && typeof latest.value === "number") {
+      return { nav: latest.value, navDate: latest.date ?? null, nameTh: fund.name_th };
+    }
+  }
+  throw new Error(`NAV not found for ${code}`);
+}
+
+async function refreshNavFromFinnomena(currentData) {
+  const fundList = await getFinnomenaFundList();
+  const updatedFunds = [];
+  const errors = [];
+
+  for (const fund of currentData.funds ?? []) {
+    try {
+      const update = await getNavFromFinnomena(fund.code, fundList);
+      updatedFunds.push({
+        ...fund,
+        nav: update.nav,
+        navDate: update.navDate,
+        navDateDisplay: formatDate(update.navDate),
+        nameTh: update.nameTh ?? fund.nameTh ?? "",
+        sourceUrl: `https://www.finnomena.com/fund/${encodeURIComponent(fund.code)}`,
+      });
+    } catch (err) {
+      errors.push({ code: fund.code, error: err.message });
+      updatedFunds.push(fund);
+    }
+  }
+
+  return { updatedFunds, errors };
+}
+
+// --- HTTP handlers ---
 function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+  response.writeHead(statusCode, {
+    "content-type": "application/json; charset=utf-8",
+    "access-control-allow-origin": "*",
+  });
   response.end(JSON.stringify(payload, null, 2));
 }
 
@@ -96,7 +160,6 @@ async function serveStatic(request, response, url) {
     response.end("Forbidden");
     return;
   }
-
   try {
     const body = await fs.readFile(absolutePath);
     response.writeHead(200, {
@@ -114,23 +177,60 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   try {
+    // GET /api/data — read + recalculate
     if (request.method === "GET" && url.pathname === "/api/data") {
       sendJson(response, 200, calculateData(await readData()));
       return;
     }
 
+    // POST /api/refresh-nav — fetch latest NAV from Finnomena, save, return updated data
+    if (request.method === "POST" && url.pathname === "/api/refresh-nav") {
+      const current = await readData();
+      const { updatedFunds, errors } = await refreshNavFromFinnomena(current);
+      const updatedAt = new Date().toISOString();
+      const next = calculateData({
+        ...current,
+        updatedAt,
+        source: "https://www.finnomena.com/",
+        funds: updatedFunds,
+      });
+      delete next.rows;
+      await writeData(next);
+      sendJson(response, 200, { ...next, navRefreshErrors: errors });
+      return;
+    }
+
+    // PUT /api/holdings — replace holdings array
     if (request.method === "PUT" && url.pathname === "/api/holdings") {
       const body = await readJsonBody(request);
       if (!Array.isArray(body.holdings)) {
         sendJson(response, 400, { error: "holdings must be an array" });
         return;
       }
-
       const current = await readData();
       const next = calculateData({
         ...current,
         updatedAt: new Date().toISOString(),
         holdings: body.holdings,
+      });
+      delete next.rows;
+      await writeData(next);
+      sendJson(response, 200, next);
+      return;
+    }
+
+    // PUT /api/funds — replace funds array
+    if (request.method === "PUT" && url.pathname === "/api/funds") {
+      const body = await readJsonBody(request);
+      if (!Array.isArray(body.funds)) {
+        sendJson(response, 400, { error: "funds must be an array" });
+        return;
+      }
+      const current = await readData();
+      const next = calculateData({
+        ...current,
+        updatedAt: new Date().toISOString(),
+        funds: body.funds,
       });
       delete next.rows;
       await writeData(next);
