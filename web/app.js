@@ -482,7 +482,7 @@ window.openFund = function(code) {
     `<div class="field"><label>ชื่อ/รหัสกองทุน · Fund name/code</label><input id="f-fcode" type="text" value="${esc(fcode)}" placeholder="SCBTP(ThaiESG)" ${readonly}></div>
     <div class="field-row">
       <div class="field"><label>ประเภท · Type</label><select id="f-type">${typeOpts}</select></div>
-      <div class="field"><label>ระยะล็อก (ปี) · Term (yrs)</label><input id="f-term" type="number" value="${termYears}" min="0" max="100"></div>
+      <div class="field"><label>ระยะที่ต้องถือครอง (ปี) · Term (yrs)</label><input id="f-term" type="number" value="${termYears}" min="0" max="100"></div>
     </div>
     <div class="field"><label>NAV ล่าสุด · Current NAV</label><input id="f-nav" type="number" value="${nav}" placeholder="11.3154" step="0.0001"></div>`,
     `${code ? '<button class="btn-danger" onclick="deleteFundFromModal()">ลบ Delete</button>' : ''}
