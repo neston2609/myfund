@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MyFund Portfolio</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <p class="eyebrow">MyFund</p>
+          <h1>บันทึกและคำนวณกองทุน</h1>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="สรุปพอร์ต">
+        <div>
+          <span>มูลค่าปัจจุบัน</span>
+          <strong id="total-value">-</strong>
+        </div>
+        <div>
+          <span>กำไร/ขาดทุน</span>
+          <strong id="total-gain">-</strong>
+        </div>
+        <div>
+          <span>อัปเดต NAV ล่าสุด</span>
+          <strong id="latest-nav-date">-</strong>
+        </div>
+      </section>
+
+      <section class="editor">
+        <form id="holding-form" class="entry-form">
+          <label>
+            ปีที่ซื้อ
+            <input id="purchase-year" name="purchaseYear" type="number" min="1900" max="2200" required>
+          </label>
+          <label>
+            กองทุน
+            <select id="fund-code" name="code" required></select>
+          </label>
+          <label>
+            ต้นทุน
+            <input id="cost" name="cost" type="number" min="0" step="0.01" required>
+          </label>
+          <label>
+            จำนวนหน่วย
+            <input id="units" name="units" type="number" min="0" step="0.0001" required>
+          </label>
+          <label>
+            ปีที่ต้องถือครอง
+            <input id="hold-years" name="holdYears" type="number" min="0" max="100" step="1" required>
+          </label>
+          <button type="submit">บันทึก</button>
+        </form>
+
+        <p id="save-state" class="save-state">พร้อมบันทึกข้อมูลในเว็บ</p>
+      </section>
+
+      <section class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ปีที่ซื้อ</th>
+              <th>กองทุน</th>
+              <th>ต้นทุน</th>
+              <th>จำนวนหน่วย</th>
+              <th>NAV</th>
+              <th>มูลค่าปัจจุบัน</th>
+              <th>กำไร/ขาดทุน</th>
+              <th>กำไร/ขาดทุน %</th>
+              <th>สถานะ</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="holding-table">
+            <tr>
+              <td colspan="10">Loading...</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
