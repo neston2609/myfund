@@ -37,6 +37,19 @@ async function loadProfiles() {
   renderAdminProfiles(data.profiles ?? []);
 }
 
+async function loadSmtpConfig() {
+  const smtp = await apiFetch('/api/admin/smtp');
+  document.getElementById('smtp-enabled').checked = Boolean(smtp.enabled);
+  document.getElementById('smtp-host').value = smtp.host || 'smtp.gmail.com';
+  document.getElementById('smtp-port').value = smtp.port || 587;
+  document.getElementById('smtp-secure').checked = Boolean(smtp.secure);
+  document.getElementById('smtp-user').value = smtp.user || '';
+  document.getElementById('smtp-from').value = smtp.from || '';
+  document.getElementById('smtp-password').placeholder = smtp.hasPassword
+    ? 'ตั้งค่าไว้แล้ว · เว้นว่างไว้ถ้าไม่เปลี่ยน'
+    : 'Gmail App Password';
+}
+
 function renderAdminProfiles(profiles) {
   const el = document.getElementById('admin-profile-list');
   if (!profiles.length) {
@@ -80,6 +93,7 @@ async function login(event) {
     document.getElementById('login-card').style.display = 'none';
     document.getElementById('admin-panel').style.display = 'flex';
     await loadProfiles();
+    await loadSmtpConfig();
     toast('เข้าสู่ระบบแล้ว');
   } catch (error) {
     toast('รหัสผ่านไม่ถูกต้อง · ' + error.message);
@@ -170,9 +184,55 @@ async function changePassword(event) {
   }
 }
 
+async function saveSmtp(event) {
+  event.preventDefault();
+  const smtp = {
+    enabled: document.getElementById('smtp-enabled').checked,
+    host: document.getElementById('smtp-host').value.trim(),
+    port: Number(document.getElementById('smtp-port').value),
+    secure: document.getElementById('smtp-secure').checked,
+    user: document.getElementById('smtp-user').value.trim(),
+    from: document.getElementById('smtp-from').value.trim(),
+    password: document.getElementById('smtp-password').value,
+  };
+
+  try {
+    await apiFetch('/api/admin/smtp', {
+      method: 'PUT',
+      body: JSON.stringify({ password: S.password, smtp }),
+    });
+    document.getElementById('smtp-password').value = '';
+    await loadSmtpConfig();
+    toast('บันทึก SMTP แล้ว');
+  } catch (error) {
+    toast('บันทึก SMTP ไม่สำเร็จ · ' + error.message, 5200);
+  }
+}
+
+async function sendTestEmail(event) {
+  event.preventDefault();
+  const to = document.getElementById('smtp-test-to').value.trim();
+  try {
+    await apiFetch('/api/admin/smtp/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        password: S.password,
+        to,
+        subject: 'MyFund SMTP test',
+        text: 'This is a test email from MyFund.',
+      }),
+    });
+    toast('ส่ง test email แล้ว');
+  } catch (error) {
+    toast('ส่ง test email ไม่สำเร็จ · ' + error.message, 6500);
+  }
+}
+
 document.getElementById('admin-login-form').addEventListener('submit', login);
 document.getElementById('admin-create-form').addEventListener('submit', createProfile);
 document.getElementById('admin-password-form').addEventListener('submit', changePassword);
+document.getElementById('smtp-form').addEventListener('submit', saveSmtp);
+document.getElementById('smtp-test-form').addEventListener('submit', sendTestEmail);
 document.getElementById('delete-form').addEventListener('submit', deleteProfile);
 document.getElementById('delete-close').addEventListener('click', closeDeleteModal);
 document.getElementById('delete-cancel').addEventListener('click', closeDeleteModal);

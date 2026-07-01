@@ -64,6 +64,59 @@
           <button class="btn-save" type="submit">เปลี่ยนรหัสผ่าน</button>
         </form>
       </div>
+
+      <div class="card">
+        <div class="section-title">SMTP สำหรับส่งเมล · Website SMTP</div>
+        <form class="smtp-form" id="smtp-form">
+          <label class="toggle-row">
+            <input id="smtp-enabled" type="checkbox">
+            <span>เปิดใช้งาน SMTP · Enable SMTP</span>
+          </label>
+          <div class="field-row">
+            <div class="field">
+              <label>SMTP Host</label>
+              <input id="smtp-host" type="text" value="smtp.gmail.com" autocomplete="off">
+            </div>
+            <div class="field">
+              <label>Port</label>
+              <input id="smtp-port" type="number" value="587" min="1" max="65535">
+            </div>
+          </div>
+          <label class="toggle-row">
+            <input id="smtp-secure" type="checkbox">
+            <span>ใช้ SSL ทันที · Use SSL/465</span>
+          </label>
+          <div class="field-row">
+            <div class="field">
+              <label>Username / Gmail address</label>
+              <input id="smtp-user" type="email" placeholder="your.name@gmail.com" autocomplete="off">
+            </div>
+            <div class="field">
+              <label>From email</label>
+              <input id="smtp-from" type="email" placeholder="your.name@gmail.com" autocomplete="off">
+            </div>
+          </div>
+          <div class="field">
+            <label>SMTP Password / Gmail App Password</label>
+            <input id="smtp-password" type="password" autocomplete="new-password" placeholder="เว้นว่างไว้ถ้าไม่ต้องการเปลี่ยนรหัสเดิม">
+          </div>
+          <div class="field-hint">
+            Gmail ใช้ <b>smtp.gmail.com</b>, port <b>587</b> สำหรับ STARTTLS หรือ <b>465</b> สำหรับ SSL และควรใช้ <b>App Password</b> ไม่ใช่รหัสผ่าน Gmail ปกติ
+          </div>
+          <button class="btn-save" type="submit">บันทึก SMTP</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="section-title">ทดสอบส่งเมล · Send test email</div>
+        <form class="smtp-test-form" id="smtp-test-form">
+          <div class="field">
+            <label>ส่งถึง · To</label>
+            <input id="smtp-test-to" type="email" required>
+          </div>
+          <button class="btn-primary" type="submit">ส่ง Test Email</button>
+        </form>
+      </div>
     </section>
   </main>
 

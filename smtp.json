@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "secure": false,
+  "user": "",
+  "password": "",
+  "from": "",
+  "updatedAt": "2026-07-01T15:11:48.067Z"
+}

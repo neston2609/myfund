@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
 import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
+import net from "node:net";
 import path from "node:path";
+import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
@@ -10,6 +12,7 @@ const legacyDataPath = path.join(webDir, "data.json");
 const profilesDir = path.join(rootDir, "profiles");
 const profileInitMarker = path.join(profilesDir, ".initialized");
 const adminPath = path.join(rootDir, "admin.json");
+const smtpPath = path.join(rootDir, "smtp.json");
 const defaultProfileSlug = "eston";
 const defaultAdminPassword = "Admin123!";
 const port = Number(process.env.PORT ?? 8010);
@@ -309,6 +312,181 @@ async function deleteProfile(slug) {
   return { ok: true, slug: safeSlug };
 }
 
+function defaultSmtpConfig() {
+  return {
+    enabled: false,
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    user: "",
+    password: "",
+    from: "",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function ensureSmtpStore() {
+  if (await fileExists(smtpPath)) return;
+  await fs.writeFile(smtpPath, `${JSON.stringify(defaultSmtpConfig(), null, 2)}\n`, "utf8");
+}
+
+async function readSmtpConfig() {
+  await ensureSmtpStore();
+  return { ...defaultSmtpConfig(), ...JSON.parse(await fs.readFile(smtpPath, "utf8")) };
+}
+
+function publicSmtpConfig(config) {
+  const { password, ...safeConfig } = config;
+  return { ...safeConfig, hasPassword: Boolean(password) };
+}
+
+async function saveSmtpConfig({ password, smtp }) {
+  await requireAdmin(password);
+  const current = await readSmtpConfig();
+  const next = {
+    ...current,
+    enabled: Boolean(smtp?.enabled),
+    host: String(smtp?.host ?? current.host).trim() || "smtp.gmail.com",
+    port: Number(smtp?.port ?? current.port) || 587,
+    secure: Boolean(smtp?.secure),
+    user: String(smtp?.user ?? "").trim(),
+    from: String(smtp?.from ?? "").trim(),
+    password: smtp?.password ? String(smtp.password) : current.password,
+    updatedAt: new Date().toISOString(),
+  };
+  await fs.writeFile(smtpPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return publicSmtpConfig(next);
+}
+
+function encodeHeader(value) {
+  return String(value ?? "").replace(/\r|\n/g, " ").trim();
+}
+
+function dotStuff(body) {
+  return String(body ?? "").replace(/\r?\n/g, "\r\n").replace(/^\./gm, "..");
+}
+
+function createSmtpSession(socket) {
+  let stream = socket;
+  let buffer = "";
+  const waiters = [];
+
+  function attach(nextStream) {
+    stream = nextStream;
+    stream.setEncoding("utf8");
+    stream.on("data", (chunk) => {
+      buffer += chunk;
+      drain();
+    });
+    stream.on("error", (error) => {
+      while (waiters.length) waiters.shift().reject(error);
+    });
+  }
+
+  function drain() {
+    while (waiters.length) {
+      const match = buffer.match(/(?:^|\r?\n)(\d{3}) [^\r\n]*(?:\r?\n|$)/);
+      if (!match) return;
+      const end = match.index + match[0].length;
+      const response = buffer.slice(0, end).trimEnd();
+      buffer = buffer.slice(end);
+      waiters.shift().resolve(response);
+    }
+  }
+
+  function read() {
+    return new Promise((resolve, reject) => {
+      waiters.push({ resolve, reject });
+      drain();
+    });
+  }
+
+  async function command(line, expectedCodes) {
+    stream.write(`${line}\r\n`);
+    const response = await read();
+    const code = Number(response.slice(0, 3));
+    if (!expectedCodes.includes(code)) throw new Error(response);
+    return response;
+  }
+
+  attach(stream);
+  return {
+    get stream() { return stream; },
+    setStream(nextStream) {
+      buffer = "";
+      attach(nextStream);
+    },
+    read,
+    command,
+    end() { stream.end(); },
+  };
+}
+
+async function connectSocket(config) {
+  const options = { host: config.host, port: Number(config.port), servername: config.host };
+  const socket = config.secure
+    ? tls.connect(options)
+    : net.connect(options);
+  await new Promise((resolve, reject) => {
+    socket.once("connect", resolve);
+    socket.once("secureConnect", resolve);
+    socket.once("error", reject);
+    socket.setTimeout(20000, () => reject(new Error("SMTP connection timed out")));
+  });
+  return socket;
+}
+
+async function sendSmtpMail({ to, subject, text }) {
+  const config = await readSmtpConfig();
+  if (!config.enabled) throw makeHttpError("SMTP is not enabled", 400);
+  if (!config.host || !config.port || !config.user || !config.password) {
+    throw makeHttpError("SMTP host, port, username, and password are required", 400);
+  }
+  const recipient = String(to ?? "").trim();
+  if (!recipient) throw makeHttpError("Recipient email is required", 400);
+  const from = config.from || config.user;
+
+  const session = createSmtpSession(await connectSocket(config));
+  try {
+    let response = await session.read();
+    if (Number(response.slice(0, 3)) !== 220) throw new Error(response);
+    await session.command("EHLO localhost", [250]);
+
+    if (!config.secure) {
+      await session.command("STARTTLS", [220]);
+      const secureSocket = tls.connect({ socket: session.stream, servername: config.host });
+      await new Promise((resolve, reject) => {
+        secureSocket.once("secureConnect", resolve);
+        secureSocket.once("error", reject);
+      });
+      session.setStream(secureSocket);
+      await session.command("EHLO localhost", [250]);
+    }
+
+    await session.command("AUTH LOGIN", [334]);
+    await session.command(Buffer.from(config.user).toString("base64"), [334]);
+    await session.command(Buffer.from(config.password).toString("base64"), [235]);
+    await session.command(`MAIL FROM:<${from}>`, [250]);
+    await session.command(`RCPT TO:<${recipient}>`, [250, 251]);
+    await session.command("DATA", [354]);
+    const message = [
+      `From: ${encodeHeader(from)}`,
+      `To: ${encodeHeader(recipient)}`,
+      `Subject: ${encodeHeader(subject || "MyFund SMTP test")}`,
+      "MIME-Version: 1.0",
+      'Content-Type: text/plain; charset="UTF-8"',
+      "Content-Transfer-Encoding: 8bit",
+      "",
+      dotStuff(text || "MyFund SMTP test email."),
+    ].join("\r\n");
+    await session.command(`${message}\r\n.`, [250]);
+    await session.command("QUIT", [221]);
+    return { ok: true };
+  } finally {
+    session.end();
+  }
+}
+
 // --- Finnomena NAV fetcher ---
 async function fetchJson(url) {
   let lastError = null;
@@ -547,6 +725,30 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    // GET /api/admin/smtp — read public SMTP settings
+    if (request.method === "GET" && url.pathname === "/api/admin/smtp") {
+      sendJson(response, 200, publicSmtpConfig(await readSmtpConfig()));
+      return;
+    }
+
+    // PUT /api/admin/smtp — save SMTP settings
+    if (request.method === "PUT" && url.pathname === "/api/admin/smtp") {
+      sendJson(response, 200, await saveSmtpConfig(await readJsonBody(request)));
+      return;
+    }
+
+    // POST /api/admin/smtp/test — send test email
+    if (request.method === "POST" && url.pathname === "/api/admin/smtp/test") {
+      const body = await readJsonBody(request);
+      await requireAdmin(body.password);
+      sendJson(response, 200, await sendSmtpMail({
+        to: body.to,
+        subject: body.subject,
+        text: body.text,
+      }));
+      return;
+    }
+
     // POST /api/admin/profiles — admin-only create profile
     if (request.method === "POST" && url.pathname === "/api/admin/profiles") {
       const body = await readJsonBody(request);
@@ -677,6 +879,7 @@ const server = createServer(async (request, response) => {
 
 await ensureProfileStore();
 await ensureAdminStore();
+await ensureSmtpStore();
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`MyFund web app: http://127.0.0.1:${port}/`);

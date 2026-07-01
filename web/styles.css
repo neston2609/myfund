@@ -511,10 +511,17 @@ input:focus, select:focus { outline: none; border-color: var(--accent) !importan
 /* ── Admin ── */
 .admin-panel { flex-direction: column; gap: 22px; }
 .admin-login,
-.admin-password-form {
+.admin-password-form,
+.smtp-test-form {
   display: grid; grid-template-columns: minmax(240px, 1fr) auto;
   gap: 12px; align-items: end;
 }
+.smtp-form { display: flex; flex-direction: column; gap: 14px; }
+.toggle-row {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; font-weight: 700; color: var(--text);
+}
+.toggle-row input { width: 18px; height: 18px; accent-color: var(--accent); }
 .admin-profile-list { display: flex; flex-direction: column; gap: 10px; }
 .admin-profile-row {
   display: grid; grid-template-columns: minmax(220px, 1fr) auto;
@@ -544,6 +551,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent) !importan
   .profile-create { grid-template-columns: 1fr; }
   .admin-login,
   .admin-password-form,
+  .smtp-test-form,
   .admin-profile-row { grid-template-columns: 1fr; }
   .admin-profile-actions { justify-content: stretch; }
   .admin-profile-actions > * { flex: 1; text-align: center; }
