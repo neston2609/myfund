@@ -5,8 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.join(rootDir, "web");
-const dataPath = path.join(webDir, "data.json");
+const legacyDataPath = path.join(webDir, "data.json");
+const profilesDir = path.join(rootDir, "profiles");
+const defaultProfileSlug = "eston";
 const port = Number(process.env.PORT ?? 8010);
+const catalogTtlMs = 6 * 60 * 60 * 1000;
+let catalogCache = null;
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -38,12 +42,83 @@ async function readJsonBody(request) {
   return raw ? JSON.parse(raw) : {};
 }
 
-async function readData() {
-  return JSON.parse(await fs.readFile(dataPath, "utf8"));
+function slugifyProfile(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0E00-\u0E7F]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
-async function writeData(data) {
-  await fs.writeFile(dataPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+function profilePath(slug) {
+  const safeSlug = slugifyProfile(slug);
+  if (!safeSlug) throw new Error("Invalid profile slug");
+  return path.join(profilesDir, `${safeSlug}.json`);
+}
+
+function blankProfileData(slug, name = slug) {
+  return calculateData({
+    updatedAt: new Date().toISOString(),
+    source: "https://www.finnomena.com/",
+    profile: { slug, name },
+    funds: [],
+    holdings: [],
+  });
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureProfileStore() {
+  await fs.mkdir(profilesDir, { recursive: true });
+  const profileFiles = (await fs.readdir(profilesDir)).filter((file) => file.endsWith(".json"));
+  if (profileFiles.length) return;
+
+  const defaultPath = profilePath(defaultProfileSlug);
+
+  let initialData = null;
+  if (await fileExists(legacyDataPath)) {
+    initialData = JSON.parse(await fs.readFile(legacyDataPath, "utf8"));
+  }
+  const next = calculateData({
+    ...(initialData ?? blankProfileData(defaultProfileSlug)),
+    profile: { slug: defaultProfileSlug, name: defaultProfileSlug },
+  });
+  delete next.rows;
+  await fs.writeFile(defaultPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+}
+
+async function readData(slug = defaultProfileSlug) {
+  await ensureProfileStore();
+  const safeSlug = slugifyProfile(slug || defaultProfileSlug);
+  const data = JSON.parse(await fs.readFile(profilePath(safeSlug), "utf8"));
+  return {
+    ...data,
+    profile: {
+      slug: safeSlug,
+      name: data.profile?.name ?? safeSlug,
+    },
+  };
+}
+
+async function writeData(data, slug = defaultProfileSlug) {
+  await ensureProfileStore();
+  const safeSlug = slugifyProfile(slug || data.profile?.slug || defaultProfileSlug);
+  const next = {
+    ...data,
+    profile: {
+      slug: safeSlug,
+      name: data.profile?.name ?? safeSlug,
+    },
+  };
+  await fs.writeFile(profilePath(safeSlug), `${JSON.stringify(next, null, 2)}\n`, "utf8");
 }
 
 function calculateData(data) {
@@ -88,19 +163,229 @@ function calculateData(data) {
   return { ...data, holdings, portfolioTotals };
 }
 
+async function listProfiles() {
+  await ensureProfileStore();
+  const files = (await fs.readdir(profilesDir)).filter((file) => file.endsWith(".json"));
+  const profiles = [];
+  for (const file of files) {
+    const slug = path.basename(file, ".json");
+    const data = calculateData(await readData(slug));
+    profiles.push({
+      slug,
+      name: data.profile?.name ?? slug,
+      funds: data.funds?.length ?? 0,
+      holdings: data.holdings?.length ?? 0,
+      portfolioTotals: data.portfolioTotals,
+      updatedAt: data.updatedAt ?? null,
+      url: `/${encodeURIComponent(slug)}`,
+    });
+  }
+  profiles.sort((a, b) => a.name.localeCompare(b.name));
+  return profiles;
+}
+
+async function createProfile({ name, slug }) {
+  await ensureProfileStore();
+  const cleanName = String(name ?? "").trim();
+  if (!cleanName) throw new Error("Profile name is required");
+
+  const baseSlug = slugifyProfile(slug || cleanName);
+  if (!baseSlug) throw new Error("Profile slug is invalid");
+
+  let candidate = baseSlug;
+  let index = 2;
+  while (await fileExists(profilePath(candidate))) {
+    candidate = `${baseSlug}-${index}`;
+    index += 1;
+  }
+
+  const data = blankProfileData(candidate, cleanName);
+  await writeData(data, candidate);
+  return {
+    slug: candidate,
+    name: cleanName,
+    funds: 0,
+    holdings: 0,
+    portfolioTotals: data.portfolioTotals,
+    updatedAt: data.updatedAt,
+    url: `/${encodeURIComponent(candidate)}`,
+  };
+}
+
+async function renameProfile(oldSlug, { name, slug }) {
+  await ensureProfileStore();
+  const currentSlug = slugifyProfile(oldSlug);
+  const cleanName = String(name ?? "").trim();
+  if (!currentSlug) throw new Error("Current profile slug is invalid");
+  if (!cleanName) throw new Error("Profile name is required");
+
+  const nextSlug = slugifyProfile(slug || cleanName);
+  if (!nextSlug) throw new Error("New profile slug is invalid");
+
+  const currentPath = profilePath(currentSlug);
+  if (!(await fileExists(currentPath))) throw new Error(`Profile not found: ${currentSlug}`);
+
+  const nextPath = profilePath(nextSlug);
+  if (nextSlug !== currentSlug && await fileExists(nextPath)) {
+    throw new Error(`Profile already exists: ${nextSlug}`);
+  }
+
+  const currentData = JSON.parse(await fs.readFile(currentPath, "utf8"));
+  const nextData = calculateData({
+    ...currentData,
+    updatedAt: new Date().toISOString(),
+    profile: { slug: nextSlug, name: cleanName },
+  });
+  delete nextData.rows;
+
+  await fs.writeFile(nextPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
+  if (nextSlug !== currentSlug) await fs.unlink(currentPath);
+
+  return {
+    slug: nextSlug,
+    name: cleanName,
+    funds: nextData.funds?.length ?? 0,
+    holdings: nextData.holdings?.length ?? 0,
+    portfolioTotals: nextData.portfolioTotals,
+    updatedAt: nextData.updatedAt,
+    url: `/${encodeURIComponent(nextSlug)}`,
+  };
+}
+
 // --- Finnomena NAV fetcher ---
 async function fetchJson(url) {
-  const response = await fetch(url, {
-    headers: { "user-agent": "Mozilla/5.0", accept: "application/json,text/html;q=0.9,*/*;q=0.8" },
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-  return response.json();
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: { "user-agent": "Mozilla/5.0", accept: "application/json,text/html;q=0.9,*/*;q=0.8" },
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+      return response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
+  throw lastError;
 }
 
 async function getFinnomenaFundList() {
   const list = await fetchJson("https://www.finnomena.com/fn3/api/fund/public/list");
   return Array.isArray(list) ? list : (list.value ?? []);
+}
+
+function inferCompany(fund) {
+  const code = String(fund.short_code ?? fund.code ?? "").toUpperCase();
+  const name = String(fund.name_th ?? fund.nameTh ?? "");
+  const rules = [
+    [/^(SCB|SCBLEQ|SCB[A-Z0-9-]*)/, "SCBAM"],
+    [/^(KT|KTMUNG|KTEF|KTF|KT[A-Z0-9-]*)/, "KTAM"],
+    [/^(K-|K[A-Z0-9]+-)/, "KAsset"],
+    [/^(ES-|TMB|TMB[A-Z0-9-]*)/, "Eastspring"],
+    [/^(B-|B[A-Z0-9]+-)/, "BBLAM"],
+    [/^(AB|AB[A-Z0-9-]*)/, "abrdn"],
+    [/^(UOB|UOB[A-Z0-9-]*)/, "UOBAM"],
+    [/^(TISCO|TISCO[A-Z0-9-]*)/, "TISCOAM"],
+    [/^(ONE|ONE[A-Z0-9-]*)/, "ONEAM"],
+    [/^(MFC|MFC[A-Z0-9-]*)/, "MFC"],
+    [/^(LH|LH[A-Z0-9-]*)/, "LHFUND"],
+    [/^(PRINCIPAL|PRINCIPAL[A-Z0-9-]*)/, "Principal"],
+    [/^(KKP|KKP[A-Z0-9-]*)/, "KKPAM"],
+    [/^(DAOL|DAOL[A-Z0-9-]*)/, "DAOL"],
+    [/^(X|XSPRING|X[A-Z0-9-]*)/, "XSpring"],
+    [/^(ASP|ASP[A-Z0-9-]*)/, "ASP"],
+    [/^(BCAP|BCAP[A-Z0-9-]*)/, "BCAP"],
+    [/^(AIA|AIA[A-Z0-9-]*)/, "AIAIMT"],
+    [/^(KWI|KWI[A-Z0-9-]*)/, "KWI"],
+  ];
+  for (const [pattern, company] of rules) {
+    if (pattern.test(code)) return company;
+  }
+  if (name.includes("ไทยพาณิชย์")) return "SCBAM";
+  if (name.includes("กรุงไทย")) return "KTAM";
+  if (name.includes("กสิกร")) return "KAsset";
+  if (name.includes("บัวหลวง")) return "BBLAM";
+  return "อื่นๆ";
+}
+
+function classifyFundType(fund) {
+  const code = String(fund.short_code ?? fund.code ?? "").toUpperCase();
+  const taxType = String(fund.fund_tax_type ?? "").toUpperCase();
+  if (code.includes("THAIESG") || taxType.includes("THAIESG")) return "ThaiESG";
+  if (code.includes("RMF") || taxType.includes("RMF")) return "RMF";
+  if (code.includes("SSF") || taxType.includes("SSF")) return "SSF";
+  if (code.includes("LTF") || taxType.includes("LTF")) return "LTF";
+  return fund.aimc_broad_category_name_en ?? fund.aimc_broad_category ?? "Fund";
+}
+
+function defaultHoldYears(type) {
+  if (type === "ThaiESG") return 5;
+  if (type === "SSF") return 10;
+  if (type === "RMF") return 0;
+  if (type === "LTF") return 7;
+  return 0;
+}
+
+function normalizeCatalogFund(fund) {
+  const code = fund.short_code ?? "";
+  const company = fund.amc_name_en ?? inferCompany(fund);
+  return {
+    id: fund.id,
+    code,
+    nameTh: fund.name_th ?? "",
+    company,
+    category: fund.aimc_category ?? fund.aimc_category_name_en ?? "",
+    type: classifyFundType(fund),
+    searchText: `${company} ${code} ${fund.name_th ?? ""}`.toLowerCase(),
+  };
+}
+
+async function getFundCatalog() {
+  const now = Date.now();
+  if (catalogCache && now - catalogCache.createdAt < catalogTtlMs) return catalogCache.data;
+
+  const list = await getFinnomenaFundList();
+  const funds = list.map(normalizeCatalogFund).filter((fund) => fund.id && fund.code);
+  const companyMap = new Map();
+  for (const fund of funds) {
+    const current = companyMap.get(fund.company) ?? { name: fund.company, count: 0 };
+    current.count += 1;
+    companyMap.set(fund.company, current);
+  }
+  const companies = [...companyMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const data = { updatedAt: new Date().toISOString(), companies, funds };
+  catalogCache = { createdAt: now, data };
+  return data;
+}
+
+async function getFundDetailFromFinnomena({ id, code }) {
+  let fundId = id;
+  if (!fundId && code) {
+    const catalog = await getFundCatalog();
+    fundId = catalog.funds.find((fund) => fund.code === code)?.id;
+  }
+  if (!fundId) throw new Error("Fund id or code is required");
+
+  const detail = await fetchJson(`https://www.finnomena.com/fn3/api/fund/public/${encodeURIComponent(fundId)}`);
+  const catalogFund = normalizeCatalogFund(detail);
+  const nav = await getNavFromFinnomena(catalogFund.code, [detail]);
+  const type = classifyFundType(detail);
+  return {
+    id: fundId,
+    code: catalogFund.code,
+    nameTh: detail.name_th ?? catalogFund.nameTh,
+    nameEn: detail.name_en ?? "",
+    company: detail.amc_name_en ?? catalogFund.company,
+    category: detail.aimc_category ?? "",
+    type,
+    holdYears: defaultHoldYears(type),
+    nav: nav.nav,
+    navDate: nav.navDate,
+    navDateDisplay: formatDate(nav.navDate),
+    sourceUrl: `https://www.finnomena.com/fund/${encodeURIComponent(catalogFund.code)}`,
+  };
 }
 
 async function getNavFromFinnomena(code, fundList) {
@@ -153,7 +438,13 @@ function sendJson(response, statusCode, payload) {
 }
 
 async function serveStatic(request, response, url) {
-  const requestPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  const pathname = decodeURIComponent(url.pathname);
+  const isProfileRoute = /^\/[^/.]+\/?$/.test(pathname) && pathname !== "/api";
+  const requestPath = pathname === "/"
+    ? "/index.html"
+    : isProfileRoute
+      ? "/profile.html"
+      : pathname;
   const absolutePath = path.resolve(webDir, `.${requestPath}`);
   if (!absolutePath.startsWith(webDir)) {
     response.writeHead(403);
@@ -175,17 +466,56 @@ async function serveStatic(request, response, url) {
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  const profileMatch = url.pathname.match(/^\/api\/profiles\/([^/]+)\/(data|refresh-nav|holdings|funds)$/);
+  const profileRootMatch = url.pathname.match(/^\/api\/profiles\/([^/]+)$/);
+  const profileSlug = profileMatch ? slugifyProfile(decodeURIComponent(profileMatch[1])) : defaultProfileSlug;
+  const profileAction = profileMatch?.[2] ?? null;
 
   try {
+    // GET /api/profiles — list available isolated portfolios
+    if (request.method === "GET" && url.pathname === "/api/profiles") {
+      sendJson(response, 200, { profiles: await listProfiles() });
+      return;
+    }
+
+    // POST /api/profiles — create an empty independent portfolio
+    if (request.method === "POST" && url.pathname === "/api/profiles") {
+      const body = await readJsonBody(request);
+      sendJson(response, 201, await createProfile(body));
+      return;
+    }
+
+    // PATCH /api/profiles/:slug — rename profile and move its backing data file
+    if (request.method === "PATCH" && profileRootMatch) {
+      const body = await readJsonBody(request);
+      sendJson(response, 200, await renameProfile(decodeURIComponent(profileRootMatch[1]), body));
+      return;
+    }
+
     // GET /api/data — read + recalculate
-    if (request.method === "GET" && url.pathname === "/api/data") {
-      sendJson(response, 200, calculateData(await readData()));
+    if (request.method === "GET" && (url.pathname === "/api/data" || profileAction === "data")) {
+      sendJson(response, 200, calculateData(await readData(profileSlug)));
+      return;
+    }
+
+    // GET /api/fund-catalog — searchable Finnomena fund catalog
+    if (request.method === "GET" && url.pathname === "/api/fund-catalog") {
+      sendJson(response, 200, await getFundCatalog());
+      return;
+    }
+
+    // GET /api/fund-detail?id=... — selected fund details with latest NAV
+    if (request.method === "GET" && url.pathname === "/api/fund-detail") {
+      sendJson(response, 200, await getFundDetailFromFinnomena({
+        id: url.searchParams.get("id"),
+        code: url.searchParams.get("code"),
+      }));
       return;
     }
 
     // POST /api/refresh-nav — fetch latest NAV from Finnomena, save, return updated data
-    if (request.method === "POST" && url.pathname === "/api/refresh-nav") {
-      const current = await readData();
+    if (request.method === "POST" && (url.pathname === "/api/refresh-nav" || profileAction === "refresh-nav")) {
+      const current = await readData(profileSlug);
       const { updatedFunds, errors } = await refreshNavFromFinnomena(current);
       const updatedAt = new Date().toISOString();
       const next = calculateData({
@@ -195,45 +525,45 @@ const server = createServer(async (request, response) => {
         funds: updatedFunds,
       });
       delete next.rows;
-      await writeData(next);
+      await writeData(next, profileSlug);
       sendJson(response, 200, { ...next, navRefreshErrors: errors });
       return;
     }
 
     // PUT /api/holdings — replace holdings array
-    if (request.method === "PUT" && url.pathname === "/api/holdings") {
+    if (request.method === "PUT" && (url.pathname === "/api/holdings" || profileAction === "holdings")) {
       const body = await readJsonBody(request);
       if (!Array.isArray(body.holdings)) {
         sendJson(response, 400, { error: "holdings must be an array" });
         return;
       }
-      const current = await readData();
+      const current = await readData(profileSlug);
       const next = calculateData({
         ...current,
         updatedAt: new Date().toISOString(),
         holdings: body.holdings,
       });
       delete next.rows;
-      await writeData(next);
+      await writeData(next, profileSlug);
       sendJson(response, 200, next);
       return;
     }
 
     // PUT /api/funds — replace funds array
-    if (request.method === "PUT" && url.pathname === "/api/funds") {
+    if (request.method === "PUT" && (url.pathname === "/api/funds" || profileAction === "funds")) {
       const body = await readJsonBody(request);
       if (!Array.isArray(body.funds)) {
         sendJson(response, 400, { error: "funds must be an array" });
         return;
       }
-      const current = await readData();
+      const current = await readData(profileSlug);
       const next = calculateData({
         ...current,
         updatedAt: new Date().toISOString(),
         funds: body.funds,
       });
       delete next.rows;
-      await writeData(next);
+      await writeData(next, profileSlug);
       sendJson(response, 200, next);
       return;
     }
@@ -243,6 +573,8 @@ const server = createServer(async (request, response) => {
     sendJson(response, 500, { error: error.message });
   }
 });
+
+await ensureProfileStore();
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`MyFund web app: http://127.0.0.1:${port}/`);

@@ -1,11 +1,15 @@
 'use strict';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const API_DATA     = '/api/data';
-const API_HOLDINGS = '/api/holdings';
-const API_FUNDS    = '/api/funds';
-const API_NAV      = '/api/refresh-nav';
-const LS_KEY       = 'myfund_settings_v1';
+const PROFILE_SLUG = location.pathname.split('/').filter(Boolean)[0] || 'eston';
+const PROFILE_API  = `/api/profiles/${encodeURIComponent(PROFILE_SLUG)}`;
+const API_DATA     = `${PROFILE_API}/data`;
+const API_HOLDINGS = `${PROFILE_API}/holdings`;
+const API_FUNDS    = `${PROFILE_API}/funds`;
+const API_NAV      = `${PROFILE_API}/refresh-nav`;
+const API_CATALOG  = '/api/fund-catalog';
+const API_DETAIL   = '/api/fund-detail';
+const LS_KEY       = `myfund_settings_v1_${PROFILE_SLUG}`;
 
 const PALETTE = ['#f97316','#0ea5e9','#22c55e','#ec4899','#a855f7','#eab308','#06b6d4','#ef4444'];
 const THEMES  = {
@@ -18,9 +22,13 @@ const THEMES  = {
 const S = {
   funds:    [],   // server fund objects: { code, nameTh, nav, navDateDisplay, holdYears, sourceUrl }
   holdings: [],   // server holding objects: { id, purchaseYear, code, cost, units, ... }
+  profile:  { slug: PROFILE_SLUG, name: PROFILE_SLUG },
   theme:    'grape',
   apiBase:  '',   // custom NAV source (optional override)
   navUpdatedAt: null,
+  catalog:  null,
+  selectedCompany: '',
+  selectedCatalogFund: null,
   loading:  false,
   toast:    null,
   toastTimer: null,
@@ -147,6 +155,10 @@ async function doRefreshNav() {
 function ingestData(data) {
   S.funds    = data.funds    ?? [];
   S.holdings = data.holdings ?? [];
+  S.profile  = data.profile  ?? { slug: PROFILE_SLUG, name: PROFILE_SLUG };
+  document.querySelectorAll('[data-profile-name]').forEach(el => {
+    el.textContent = S.profile.name ?? PROFILE_SLUG;
+  });
 }
 
 // ── Computed values ────────────────────────────────────────────────────────
@@ -463,6 +475,85 @@ window.deleteHolding = async function(id) {
 };
 
 // ── Fund modal ─────────────────────────────────────────────────────────────
+async function ensureCatalog() {
+  if (S.catalog) return S.catalog;
+  S.catalog = await apiFetch(API_CATALOG);
+  return S.catalog;
+}
+
+function compactFundName(fund) {
+  return `${fund.code} · ${fund.nameTh || ''}`.trim();
+}
+
+function renderCompanyResults() {
+  const q = (document.getElementById('f-company-search')?.value || '').trim().toLowerCase();
+  const list = (S.catalog?.companies ?? [])
+    .filter(company => !q || company.name.toLowerCase().includes(q))
+    .slice(0, 40);
+  const el = document.getElementById('company-results');
+  if (!el) return;
+  el.innerHTML = list.map(company =>
+    `<button class="pick-row${S.selectedCompany===company.name?' active':''}" type="button" onclick="selectCompany('${encodeURIComponent(company.name)}')">
+      <span>${esc(company.name)}</span>
+      <small>${company.count} funds</small>
+    </button>`
+  ).join('') || '<div class="pick-empty">ไม่พบบริษัท · No company found</div>';
+}
+
+function renderFundResults() {
+  const q = (document.getElementById('f-fund-search')?.value || '').trim().toLowerCase();
+  const funds = (S.catalog?.funds ?? [])
+    .filter(fund => !S.selectedCompany || fund.company === S.selectedCompany)
+    .filter(fund => !q || fund.searchText.includes(q))
+    .slice(0, 80);
+  const el = document.getElementById('fund-results');
+  if (!el) return;
+  el.innerHTML = funds.map(fund =>
+    `<button class="pick-row${S.selectedCatalogFund?.id===fund.id?' active':''}" type="button" onclick="selectCatalogFund('${encodeURIComponent(fund.id)}')">
+      <span><b>${esc(fund.code)}</b> ${esc(fund.nameTh)}</span>
+      <small>${esc(fund.company)}</small>
+    </button>`
+  ).join('') || '<div class="pick-empty">ไม่พบกองทุน · No fund found</div>';
+}
+
+window.renderCompanyResults = renderCompanyResults;
+window.renderFundResults = renderFundResults;
+
+window.selectCompany = function(companyParam) {
+  const company = decodeURIComponent(companyParam);
+  S.selectedCompany = company;
+  S.selectedCatalogFund = null;
+  const fundSearch = document.getElementById('f-fund-search');
+  if (fundSearch) fundSearch.value = '';
+  const selected = document.getElementById('selected-company-label');
+  if (selected) selected.textContent = company || 'ทุกบริษัท · All companies';
+  const selectedFund = document.getElementById('selected-fund-label');
+  if (selectedFund) selectedFund.textContent = 'ยังไม่ได้เลือกกองทุน · No fund selected';
+  renderCompanyResults();
+  renderFundResults();
+};
+
+window.selectCatalogFund = function(idParam) {
+  const id = decodeURIComponent(idParam);
+  const fund = (S.catalog?.funds ?? []).find(item => item.id === id);
+  if (!fund) return;
+  S.selectedCatalogFund = fund;
+  const selectedFund = document.getElementById('selected-fund-label');
+  if (selectedFund) selectedFund.textContent = compactFundName(fund);
+  renderFundResults();
+};
+
+window.setFundMode = function(mode) {
+  document.querySelectorAll('[data-fund-mode-panel]').forEach(panel => {
+    panel.style.display = panel.dataset.fundModePanel === mode ? 'flex' : 'none';
+  });
+  document.querySelectorAll('[data-fund-mode]').forEach(button => {
+    button.classList.toggle('active', button.dataset.fundMode === mode);
+  });
+  const modeInput = document.getElementById('f-mode');
+  if (modeInput) modeInput.value = mode;
+};
+
 window.openFund = function(code) {
   S.modal = { kind: 'fund', editId: code || null };
   let fcode = '', type = 'SSF', nav = '', termYears = '10';
@@ -479,34 +570,89 @@ window.openFund = function(code) {
   const readonly = code ? 'readonly style="opacity:.6;cursor:not-allowed;"' : '';
 
   openModal(title,
-    `<div class="field"><label>ชื่อ/รหัสกองทุน · Fund name/code</label><input id="f-fcode" type="text" value="${esc(fcode)}" placeholder="SCBTP(ThaiESG)" ${readonly}></div>
-    <div class="field-row">
-      <div class="field"><label>ประเภท · Type</label><select id="f-type">${typeOpts}</select></div>
-      <div class="field"><label>ระยะที่ต้องถือครอง (ปี) · Term (yrs)</label><input id="f-term" type="number" value="${termYears}" min="0" max="100"></div>
+    `${code ? '' : `<input id="f-mode" type="hidden" value="list">
+    <div class="segmented">
+      <button class="active" data-fund-mode="list" type="button" onclick="setFundMode('list')">เลือกจาก List</button>
+      <button data-fund-mode="manual" type="button" onclick="setFundMode('manual')">กรอกเอง</button>
+    </div>`}
+    <div class="fund-picker" data-fund-mode-panel="list" style="${code ? 'display:none;' : ''}">
+      <div class="field"><label>ค้นหาบริษัทกองทุน · Search asset manager</label><input id="f-company-search" type="search" placeholder="SCBAM, KTAM, KAsset" oninput="renderCompanyResults()"></div>
+      <div class="pick-list compact" id="company-results"><div class="pick-empty">กำลังโหลด · Loading</div></div>
+      <div class="selected-pill" id="selected-company-label">ทุกบริษัท · All companies</div>
+      <div class="field"><label>ค้นหาชื่อ/รหัสกองทุน · Search fund</label><input id="f-fund-search" type="search" placeholder="SCBTP, ThaiESG, กองทุน" oninput="renderFundResults()"></div>
+      <div class="pick-list" id="fund-results"><div class="pick-empty">กำลังโหลด · Loading</div></div>
+      <div class="selected-pill" id="selected-fund-label">ยังไม่ได้เลือกกองทุน · No fund selected</div>
     </div>
-    <div class="field"><label>NAV ล่าสุด · Current NAV</label><input id="f-nav" type="number" value="${nav}" placeholder="11.3154" step="0.0001"></div>`,
+    <div class="manual-fund-fields" data-fund-mode-panel="manual" style="${code ? 'display:flex;' : 'display:none;'}">
+      <div class="field"><label>ชื่อ/รหัสกองทุน · Fund name/code</label><input id="f-fcode" type="text" value="${esc(fcode)}" placeholder="SCBTP(ThaiESG)" ${readonly}></div>
+      <div class="field-row">
+        <div class="field"><label>ประเภท · Type</label><select id="f-type">${typeOpts}</select></div>
+        <div class="field"><label>ระยะที่ต้องถือครอง (ปี) · Term (yrs)</label><input id="f-term" type="number" value="${termYears}" min="0" max="100"></div>
+      </div>
+      <div class="field"><label>NAV ล่าสุด · Current NAV</label><input id="f-nav" type="number" value="${nav}" placeholder="11.3154" step="0.0001"></div>
+    </div>`,
     `${code ? '<button class="btn-danger" onclick="deleteFundFromModal()">ลบ Delete</button>' : ''}
     <div class="modal-foot-right">
       <button class="btn-cancel" onclick="closeModal()">ยกเลิก Cancel</button>
       <button class="btn-save" onclick="saveFund()">บันทึก Save</button>
     </div>`
   );
+
+  if (!code) {
+    S.selectedCompany = '';
+    S.selectedCatalogFund = null;
+    ensureCatalog()
+      .then(() => { renderCompanyResults(); renderFundResults(); })
+      .catch(err => {
+        document.getElementById('company-results').innerHTML = `<div class="pick-empty">โหลดรายชื่อไม่ได้ · ${esc(err.message)}</div>`;
+        document.getElementById('fund-results').innerHTML = `<div class="pick-empty">โหลดรายชื่อไม่ได้ · ${esc(err.message)}</div>`;
+      });
+  }
 };
 
 window.saveFund = async function() {
-  const v = getFormValues(['f-fcode','f-type','f-term','f-nav']);
-  if (!v['f-fcode'] || v['f-nav'] === '') { toast('กรอกชื่อและ NAV · Name & NAV required'); return; }
-
   const isEdit = !!S.modal.editId;
-  const rec = {
-    code:         v['f-fcode'].trim(),
-    nameTh:       v['f-fcode'].trim(),
-    type:         v['f-type'] || 'SSF',
-    nav:          parseFloat(v['f-nav']) || 0,
-    holdYears:    parseInt(v['f-term']) || 0,
-    navDateDisplay: isEdit ? (S.funds.find(f=>f.code===S.modal.editId)?.navDateDisplay || '') : '',
-    sourceUrl:    `https://www.finnomena.com/fund/${encodeURIComponent(v['f-fcode'].trim())}`,
-  };
+  const mode = document.getElementById('f-mode')?.value || 'manual';
+  let rec;
+
+  try {
+    if (!isEdit && mode === 'list') {
+      if (!S.selectedCatalogFund) { toast('เลือกกองทุนก่อน · Select a fund'); return; }
+      const detail = await apiFetch(`${API_DETAIL}?id=${encodeURIComponent(S.selectedCatalogFund.id)}`);
+      rec = {
+        code: detail.code,
+        nameTh: detail.nameTh,
+        company: detail.company,
+        category: detail.category,
+        type: detail.type || 'Fund',
+        nav: Number(detail.nav || 0),
+        navDate: detail.navDate,
+        navDateDisplay: detail.navDateDisplay,
+        holdYears: detail.holdYears ?? 0,
+        sourceUrl: detail.sourceUrl,
+      };
+    } else {
+      const v = getFormValues(['f-fcode','f-type','f-term','f-nav']);
+      if (!v['f-fcode'] || v['f-nav'] === '') { toast('กรอกชื่อและ NAV · Name & NAV required'); return; }
+      rec = {
+        code:         v['f-fcode'].trim(),
+        nameTh:       v['f-fcode'].trim(),
+        type:         v['f-type'] || 'SSF',
+        nav:          parseFloat(v['f-nav']) || 0,
+        holdYears:    parseInt(v['f-term']) || 0,
+        navDateDisplay: isEdit ? (S.funds.find(f=>f.code===S.modal.editId)?.navDateDisplay || '') : '',
+        sourceUrl:    `https://www.finnomena.com/fund/${encodeURIComponent(v['f-fcode'].trim())}`,
+      };
+    }
+  } catch (err) {
+    toast('ดึงข้อมูลกองทุนไม่สำเร็จ · ' + err.message);
+    return;
+  }
+
+  if (!isEdit && S.funds.some(f => f.code === rec.code)) {
+    toast('มีกองทุนนี้อยู่แล้ว · Fund already exists');
+    return;
+  }
 
   const funds = isEdit
     ? S.funds.map(f => f.code === S.modal.editId ? { ...f, ...rec, code: f.code } : f)
@@ -549,8 +695,15 @@ window.deleteFund = async function(code) {
 // ── Settings modal ─────────────────────────────────────────────────────────
 function openSettings() {
   S.modal = { kind: 'settings' };
+  const activeSource = S.apiBase
+    ? S.apiBase
+    : 'https://www.finnomena.com/ (ค่าเริ่มต้น · default)';
   openModal('แหล่งข้อมูล NAV · NAV data source',
-    `<div class="field"><label>Custom NAV API URL (optional)</label>
+    `<div class="field-hint" style="display:flex;flex-direction:column;gap:4px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;">แหล่งข้อมูลที่ใช้อยู่ · Active source</div>
+      <div style="font-size:13px;font-weight:600;word-break:break-all;">${esc(activeSource)}</div>
+    </div>
+    <div class="field"><label>Custom NAV API URL (optional)</label>
       <input id="f-apibase" type="text" value="${esc(S.apiBase)}" placeholder="https://your-api.com/nav?fund={code}">
     </div>
     <div class="field-hint">

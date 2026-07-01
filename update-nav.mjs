@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const dataPath = path.join("web", "data.json");
+const profilesDir = "profiles";
 
 async function fetchJson(url) {
   const response = await fetch(url, {
@@ -105,48 +105,64 @@ function calculateData(data) {
 }
 
 async function main() {
-  const raw = await fs.readFile(dataPath, "utf8");
-  const currentData = JSON.parse(raw);
-  const fundCodes = [...new Set((currentData.funds ?? []).map((fund) => fund.code).filter(Boolean))];
-  if (!fundCodes.length) {
-    throw new Error("No funds found in web/data.json.");
-  }
-
-  const previousFunds = new Map((currentData.funds ?? []).map((fund) => [fund.code, fund]));
   const fundList = await getFundList();
-  const updatedFunds = [];
-  for (const code of fundCodes) {
-    const update = await getNavFromFinnomena(code, fundList);
-    const previous = previousFunds.get(code) ?? {};
-    updatedFunds.push({
-      ...previous,
-      ...update,
-      navDateDisplay: formatDate(update.navDate),
-      holdYears: previous.holdYears ?? 0,
+  const profileFiles = (await fs.readdir(profilesDir)).filter((file) => file.endsWith(".json"));
+  const results = [];
+
+  for (const file of profileFiles) {
+    const dataPath = path.join(profilesDir, file);
+    const raw = await fs.readFile(dataPath, "utf8");
+    const currentData = JSON.parse(raw);
+    const fundCodes = [...new Set((currentData.funds ?? []).map((fund) => fund.code).filter(Boolean))];
+    if (!fundCodes.length) {
+      results.push({ profile: path.basename(file, ".json"), funds: [], holdings: currentData.holdings?.length ?? 0, skipped: true });
+      continue;
+    }
+
+    const previousFunds = new Map((currentData.funds ?? []).map((fund) => [fund.code, fund]));
+    const updatedFunds = [];
+    const errors = [];
+    for (const code of fundCodes) {
+      try {
+        const update = await getNavFromFinnomena(code, fundList);
+        const previous = previousFunds.get(code) ?? {};
+        updatedFunds.push({
+          ...previous,
+          ...update,
+          navDateDisplay: formatDate(update.navDate),
+          holdYears: previous.holdYears ?? 0,
+        });
+      } catch (error) {
+        errors.push({ code, error: error.message });
+        updatedFunds.push(previousFunds.get(code));
+      }
+    }
+
+    const updatedAt = new Date().toISOString();
+    const nextData = calculateData({
+      ...currentData,
+      updatedAt,
+      source: "https://www.finnomena.com/",
+      funds: updatedFunds.filter(Boolean),
+    });
+    delete nextData.rows;
+
+    await fs.writeFile(dataPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
+    results.push({
+      profile: nextData.profile?.slug ?? path.basename(file, ".json"),
+      updatedAt,
+      funds: nextData.funds.map((fund) => ({
+        code: fund.code,
+        nav: fund.nav,
+        navDate: fund.navDateDisplay,
+      })),
+      holdings: nextData.holdings.length,
+      portfolioTotals: nextData.portfolioTotals,
+      errors,
     });
   }
 
-  const updatedAt = new Date().toISOString();
-  const nextData = calculateData({
-    ...currentData,
-    updatedAt,
-    source: "https://www.finnomena.com/",
-    funds: updatedFunds,
-  });
-  delete nextData.rows;
-
-  await fs.writeFile(dataPath, `${JSON.stringify(nextData, null, 2)}\n`, "utf8");
-
-  console.log(JSON.stringify({
-    updatedAt,
-    funds: nextData.funds.map((fund) => ({
-      code: fund.code,
-      nav: fund.nav,
-      navDate: fund.navDateDisplay,
-    })),
-    holdings: nextData.holdings.length,
-    portfolioTotals: nextData.portfolioTotals,
-  }, null, 2));
+  console.log(JSON.stringify({ profiles: results }, null, 2));
 }
 
 await main();

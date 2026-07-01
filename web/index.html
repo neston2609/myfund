@@ -3,131 +3,84 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MyFund · กองทุนของฉัน</title>
+  <title>MyFund · Profiles</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="theme-grape">
+  <main class="app profile-home">
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="brand-icon">฿</div>
+        <div>
+          <div class="brand-title">MyFund <span class="brand-sub">· Profiles</span></div>
+          <div class="brand-desc">แยกพอร์ตและข้อมูลแต่ละคนเป็นอิสระต่อกัน</div>
+        </div>
+      </div>
+    </header>
 
-<div id="app" class="app">
-
-  <!-- TOPBAR -->
-  <header class="topbar">
-    <div class="topbar-brand">
-      <div class="brand-icon">฿</div>
+    <section class="hero-card profile-hero">
       <div>
-        <div class="brand-title">MyFund <span class="brand-sub">· กองทุนของฉัน</span></div>
-        <div class="brand-desc">Portfolio dashboard · พอร์ตการลงทุน</div>
+        <div class="hero-label">เลือก Profile · Select Portfolio</div>
+        <div class="hero-value profile-hero-title">Profiles</div>
+        <div class="hero-badges">
+          <span class="badge-primary" id="profile-count">— profiles</span>
+          <span class="badge-secondary">ข้อมูลแยกไฟล์ต่อ profile</span>
+        </div>
       </div>
-    </div>
-    <div class="topbar-actions">
-      <div class="theme-switcher" id="theme-switcher"></div>
-      <button class="btn-outline" id="btn-refresh-nav">↻ อัปเดต NAV</button>
-      <button class="btn-icon" id="btn-settings" title="Settings">⚙</button>
-    </div>
-  </header>
+    </section>
 
-  <!-- HERO CARD -->
-  <div class="hero-card" id="hero-card">
-    <div class="hero-left">
-      <div class="hero-label">มูลค่าพอร์ตปัจจุบัน · Total Portfolio Value</div>
-      <div class="hero-value" id="hero-value">—</div>
-      <div class="hero-badges">
-        <span class="badge-primary" id="hero-pl">—</span>
-        <span class="badge-secondary" id="hero-cost">—</span>
+    <section class="card">
+      <div class="table-header profile-form-head">
+        <div>
+          <div class="section-title" style="margin:0;">เพิ่ม Profile · Add profile</div>
+          <div class="profile-muted">สร้างพอร์ตใหม่แบบว่าง ข้อมูลจะไม่ปนกับ profile อื่น</div>
+        </div>
       </div>
-    </div>
-    <div class="hero-right">
-      <div><b id="hero-lots">—</b> รายการ · lots</div>
-      <div><b id="hero-funds">—</b> กองทุน · funds</div>
-      <div class="hero-nav-status" id="hero-nav-status">ยังไม่ได้อัปเดต NAV</div>
-    </div>
-  </div>
+      <form class="profile-create" id="profile-form">
+        <div class="field">
+          <label>ชื่อ Profile · Profile name</label>
+          <input id="profile-name" type="text" placeholder="เช่น eston, retirement, mom" autocomplete="off" required>
+        </div>
+        <button class="btn-primary" type="submit">+ เพิ่ม Profile</button>
+      </form>
+    </section>
 
-  <!-- ACTION BUTTONS -->
-  <div class="action-bar">
-    <button class="btn-primary" id="btn-add-holding">+ เพิ่มรายการซื้อ · Add holding</button>
-    <button class="btn-outline" id="btn-add-fund">+ เพิ่มกองทุน · Add fund</button>
-    <button class="btn-outline" id="btn-export-csv">⤓ Export CSV</button>
-  </div>
+    <section>
+      <div class="section-title">Profiles ทั้งหมด · All profiles</div>
+      <div class="profile-grid" id="profile-list">
+        <div class="card profile-card">กำลังโหลด · Loading</div>
+      </div>
+    </section>
+  </main>
 
-  <!-- CHARTS -->
-  <div class="charts-grid" id="charts-section">
-    <div class="card">
-      <div class="card-title">สัดส่วนพอร์ต · Allocation</div>
-      <div class="pie-row">
-        <div class="pie-wrap">
-          <div class="pie" id="pie-chart"></div>
-          <div class="pie-center">
-            <div class="pie-label">Funds</div>
-            <div class="pie-count" id="pie-count">—</div>
+  <div class="modal-backdrop" id="rename-backdrop" style="display:none;">
+    <div class="modal profile-rename-modal">
+      <div class="modal-head">
+        <div class="modal-title">แก้ชื่อ Profile · Rename profile</div>
+        <button class="btn-icon" id="rename-close" type="button">✕</button>
+      </div>
+      <form id="rename-form">
+        <div class="modal-body">
+          <div class="field">
+            <label>ชื่อใหม่ · New profile name</label>
+            <input id="rename-name" type="text" autocomplete="off" required>
+          </div>
+          <div class="field-hint">ระบบจะเปลี่ยน URL และไฟล์ข้อมูลให้ตรงกับชื่อใหม่ โดยข้อมูลเดิมยังอยู่ครบ</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-cancel" id="rename-cancel" type="button">ยกเลิก Cancel</button>
+          <div class="modal-foot-right">
+            <button class="btn-save" type="submit">บันทึก Save</button>
           </div>
         </div>
-        <div class="legend" id="legend"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">เงินลงทุน vs มูลค่า · Invested vs Value</div>
-      <div class="bar-legend">
-        <span><span class="bar-dot cost-dot"></span>ต้นทุน Cost</span>
-        <span><span class="bar-dot value-dot"></span>มูลค่า Value</span>
-      </div>
-      <div class="bar-chart" id="bar-chart"></div>
+      </form>
     </div>
   </div>
 
-  <!-- FUND CARDS -->
-  <div>
-    <div class="section-title">กองทุนของฉัน · My Funds</div>
-    <div class="fund-cards" id="fund-cards"></div>
-  </div>
-
-  <!-- HOLDINGS TABLE -->
-  <div class="card table-card">
-    <div class="table-header">
-      <div class="section-title" style="margin:0;">รายการซื้อ · Holdings</div>
-      <button class="btn-primary btn-sm" id="btn-add-holding2">+ Add</button>
-    </div>
-    <div class="table-scroll">
-      <div class="table-grid">
-        <div class="th-row">
-          <div>ปี Year</div>
-          <div>กองทุน Fund</div>
-          <div class="ta-r">ต้นทุน Cost</div>
-          <div class="ta-r">หน่วย Units</div>
-          <div class="ta-r">NAV</div>
-          <div class="ta-r">มูลค่า Value</div>
-          <div class="ta-r">กำไร/ขาดทุน</div>
-          <div>ครบกำหนด Maturity</div>
-          <div></div>
-        </div>
-        <div id="holdings-body"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="footer-note">มูลค่าและกำไร/ขาดทุนคำนวณอัตโนมัติจาก NAV · Value &amp; P/L auto-calculated from NAV. ข้อมูลบันทึกในเซิร์ฟเวอร์ · Data stored on server.</div>
-
-</div>
-
-<!-- MODAL -->
-<div class="modal-backdrop" id="modal-backdrop" style="display:none;">
-  <div class="modal" id="modal">
-    <div class="modal-head">
-      <div class="modal-title" id="modal-title">—</div>
-      <button class="btn-icon" id="modal-close">✕</button>
-    </div>
-    <div class="modal-body" id="modal-body"></div>
-    <div class="modal-foot" id="modal-foot"></div>
-  </div>
-</div>
-
-<!-- TOAST -->
-<div class="toast" id="toast" style="display:none;"></div>
-
-<script src="app.js"></script>
+  <div class="toast" id="toast" style="display:none;"></div>
+  <script src="profiles.js"></script>
 </body>
 </html>
