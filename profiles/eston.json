@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-07-01T03:23:44.240Z",
+  "updatedAt": "2026-07-01T14:54:38.333Z",
   "source": "https://www.finnomena.com/",
   "funds": [
     {
@@ -14,18 +14,18 @@
     {
       "code": "SCBLEQ-SSF",
       "nameTh": "กองทุนเปิดไทยพาณิชย์ หุ้น LOW VOLATILITY (ชนิดเพื่อการออม)",
-      "nav": 15.9599,
-      "navDate": "2026-06-29T00:00:00Z",
-      "navDateDisplay": "2026-06-29",
+      "nav": 16.0374,
+      "navDate": "2026-06-30T00:00:00Z",
+      "navDateDisplay": "2026-06-30",
       "holdYears": 10,
       "sourceUrl": "https://www.finnomena.com/fund/SCBLEQ-SSF"
     },
     {
       "code": "SCBTP(ThaiESG)",
       "nameTh": "กองทุนเปิดไทยพาณิชย์ หุ้นไทยยั่งยืนพาสซีฟ ชนิดไทยเพื่อความยั่งยืน",
-      "nav": 11.6173,
-      "navDate": "2026-06-30T00:00:00Z",
-      "navDateDisplay": "2026-06-30",
+      "nav": 11.6004,
+      "navDate": "2026-07-01T00:00:00Z",
+      "navDateDisplay": "2026-07-01",
       "holdYears": 5,
       "sourceUrl": "https://www.finnomena.com/fund/SCBTP(ThaiESG)"
     }
@@ -38,10 +38,10 @@
       "code": "SCBTP(ThaiESG)",
       "cost": 70000,
       "units": 7389.3445,
-      "nav": 11.6173,
-      "currentValue": 85844.23185985,
-      "gain": 15844.231859849999,
-      "gainPct": 0.22634616942642855,
+      "nav": 11.6004,
+      "currentValue": 85719.3519378,
+      "gain": 15719.351937800006,
+      "gainPct": 0.22456217054000008,
       "holdYears": 5,
       "maturityYear": 2030,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2030)"
@@ -53,10 +53,10 @@
       "code": "SCBTP(ThaiESG)",
       "cost": 60000,
       "units": 6140.7459,
-      "nav": 11.6173,
-      "currentValue": 71338.88734407,
-      "gain": 11338.887344069997,
-      "gainPct": 0.18898145573449995,
+      "nav": 11.6004,
+      "currentValue": 71235.10873836,
+      "gain": 11235.108738359995,
+      "gainPct": 0.1872518123059999,
       "holdYears": 5,
       "maturityYear": 2029,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2029)"
@@ -68,10 +68,10 @@
       "code": "SCBLEQ-SSF",
       "cost": 60000,
       "units": 3890.1676,
-      "nav": 15.9599,
-      "currentValue": 62086.68587924,
-      "gain": 2086.6858792400017,
-      "gainPct": 0.03477809798733336,
+      "nav": 16.0374,
+      "currentValue": 62388.17386824001,
+      "gain": 2388.17386824001,
+      "gainPct": 0.03980289780400017,
       "holdYears": 10,
       "maturityYear": 2034,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2034)"
@@ -83,10 +83,10 @@
       "code": "SCBLEQ-SSF",
       "cost": 70000,
       "units": 4900.8968,
-      "nav": 15.9599,
-      "currentValue": 78217.82283832,
-      "gain": 8217.822838320004,
-      "gainPct": 0.11739746911885719,
+      "nav": 16.0374,
+      "currentValue": 78597.64234032002,
+      "gain": 8597.642340320017,
+      "gainPct": 0.12282346200457167,
       "holdYears": 10,
       "maturityYear": 2033,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2033)"
@@ -113,10 +113,10 @@
       "code": "SCBLEQ-SSF",
       "cost": 70000,
       "units": 5502.8418,
-      "nav": 15.9599,
-      "currentValue": 87824.80484382,
-      "gain": 17824.804843820006,
-      "gainPct": 0.25464006919742865,
+      "nav": 16.0374,
+      "currentValue": 88251.27508332001,
+      "gain": 18251.27508332001,
+      "gainPct": 0.2607325011902859,
       "holdYears": 10,
       "maturityYear": 2032,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2032)"
@@ -143,10 +143,10 @@
       "code": "SCBLEQ-SSF",
       "cost": 100000,
       "units": 6764.2065,
-      "nav": 15.9599,
-      "currentValue": 107956.05931935,
-      "gain": 7956.059319349995,
-      "gainPct": 0.07956059319349995,
+      "nav": 16.0374,
+      "currentValue": 108480.28532310002,
+      "gain": 8480.285323100019,
+      "gainPct": 0.08480285323100019,
       "holdYears": 10,
       "maturityYear": 2031,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2031)"
@@ -173,10 +173,10 @@
       "code": "SCBLEQ-SSF",
       "cost": 70000,
       "units": 5677.2561,
-      "nav": 15.9599,
-      "currentValue": 90608.43963038998,
-      "gain": 20608.439630389985,
-      "gainPct": 0.29440628043414263,
+      "nav": 16.0374,
+      "currentValue": 91048.42697814,
+      "gain": 21048.426978140007,
+      "gainPct": 0.30069181397342865,
       "holdYears": 10,
       "maturityYear": 2030,
       "status": "ยังไม่ครบกำหนด (ครบกำหนดปี 2030)"
@@ -199,8 +199,8 @@
   ],
   "portfolioTotals": {
     "cost": 740000,
-    "currentValue": 880105.4928315199,
-    "gain": 140105.49283151998
+    "currentValue": 881948.82538576,
+    "gain": 141948.82538576005
   },
   "profile": {
     "slug": "eston",

@@ -216,6 +216,7 @@ function computePortfolio() {
     const plPct = cost ? pl / cost : 0;
     return {
       code: f.code, type: f.type || 'Fund',
+      sourceUrl: f.sourceUrl || `https://www.finnomena.com/fund/${encodeURIComponent(f.code)}`,
       color: colorOf(f.code),
       nav: Number(f.nav || 0), navStr: fmt4(f.nav),
       termYears: Number(f.holdYears || 0),
@@ -315,7 +316,7 @@ function renderFundCards(p) {
     `<div class="fund-card">
       <div class="fund-card-head">
         <span class="fund-color-dot" style="background:${f.color};"></span>
-        <span class="fund-code" title="${esc(f.code)}">${esc(f.code)}</span>
+        <a class="fund-code fund-code-link" href="${esc(f.sourceUrl)}" target="_blank" rel="noopener noreferrer" title="เปิดรายละเอียดกองทุน · Open fund details">${esc(f.code)}</a>
         <span class="fund-type-badge">${esc(f.type)}</span>
       </div>
       <div class="fund-stats">
