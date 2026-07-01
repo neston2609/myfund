@@ -253,6 +253,15 @@ input:focus, select:focus { outline: none; border-color: var(--accent) !importan
 }
 .fund-stat-label { color: var(--muted); font-size: 12px; margin-bottom: 2px; }
 .fund-stat-val   { font-weight: 700; font-variant-numeric: tabular-nums; }
+.fund-unit-row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 12px; margin-top: 12px; padding: 9px 10px;
+  background: var(--surface2); border-radius: 11px;
+  font-size: 12px; color: var(--muted);
+}
+.fund-unit-row strong {
+  color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums;
+}
 .fund-pl-row {
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 13px;

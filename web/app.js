@@ -221,6 +221,7 @@ function computePortfolio() {
       termYears: Number(f.holdYears || 0),
       cost, value, pl, plPct,
       costStr:  fmt(cost),  valueStr: fmt(value),
+      units, unitsStr: fmt4(units),
       plStr:    (pl >= 0 ? '+' : '') + fmt(pl),
       plPctStr: fmtPct(plPct),
       plColor:  pl >= 0 ? 'var(--pos)' : 'var(--neg)',
@@ -320,6 +321,10 @@ function renderFundCards(p) {
       <div class="fund-stats">
         <div><div class="fund-stat-label">มูลค่า Value</div><div class="fund-stat-val">${f.valueStr}</div></div>
         <div style="text-align:right;"><div class="fund-stat-label">NAV</div><div class="fund-stat-val">${f.navStr}</div></div>
+      </div>
+      <div class="fund-unit-row">
+        <span>จำนวนหน่วยรวม · Total units</span>
+        <strong>${f.unitsStr}</strong>
       </div>
       <div class="fund-pl-row">
         <span class="fund-pl" style="color:${f.plColor};">${f.plStr} <span class="fund-pl-pct">(${f.plPctStr})</span></span>
