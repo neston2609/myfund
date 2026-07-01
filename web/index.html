@@ -16,37 +16,10 @@
         <div class="brand-icon">฿</div>
         <div>
           <div class="brand-title">MyFund <span class="brand-sub">· Profiles</span></div>
-          <div class="brand-desc">แยกพอร์ตและข้อมูลแต่ละคนเป็นอิสระต่อกัน</div>
+          <div class="brand-desc">เลือก profile เพื่อดูพอร์ตการลงทุน</div>
         </div>
       </div>
     </header>
-
-    <section class="hero-card profile-hero">
-      <div>
-        <div class="hero-label">เลือก Profile · Select Portfolio</div>
-        <div class="hero-value profile-hero-title">Profiles</div>
-        <div class="hero-badges">
-          <span class="badge-primary" id="profile-count">— profiles</span>
-          <span class="badge-secondary">ข้อมูลแยกไฟล์ต่อ profile</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="table-header profile-form-head">
-        <div>
-          <div class="section-title" style="margin:0;">เพิ่ม Profile · Add profile</div>
-          <div class="profile-muted">สร้างพอร์ตใหม่แบบว่าง ข้อมูลจะไม่ปนกับ profile อื่น</div>
-        </div>
-      </div>
-      <form class="profile-create" id="profile-form">
-        <div class="field">
-          <label>ชื่อ Profile · Profile name</label>
-          <input id="profile-name" type="text" placeholder="เช่น eston, retirement, mom" autocomplete="off" required>
-        </div>
-        <button class="btn-primary" type="submit">+ เพิ่ม Profile</button>
-      </form>
-    </section>
 
     <section>
       <div class="section-title">Profiles ทั้งหมด · All profiles</div>
@@ -55,30 +28,6 @@
       </div>
     </section>
   </main>
-
-  <div class="modal-backdrop" id="rename-backdrop" style="display:none;">
-    <div class="modal profile-rename-modal">
-      <div class="modal-head">
-        <div class="modal-title">แก้ชื่อ Profile · Rename profile</div>
-        <button class="btn-icon" id="rename-close" type="button">✕</button>
-      </div>
-      <form id="rename-form">
-        <div class="modal-body">
-          <div class="field">
-            <label>ชื่อใหม่ · New profile name</label>
-            <input id="rename-name" type="text" autocomplete="off" required>
-          </div>
-          <div class="field-hint">ระบบจะเปลี่ยน URL และไฟล์ข้อมูลให้ตรงกับชื่อใหม่ โดยข้อมูลเดิมยังอยู่ครบ</div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn-cancel" id="rename-cancel" type="button">ยกเลิก Cancel</button>
-          <div class="modal-foot-right">
-            <button class="btn-save" type="submit">บันทึก Save</button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
 
   <div class="toast" id="toast" style="display:none;"></div>
   <script src="profiles.js"></script>

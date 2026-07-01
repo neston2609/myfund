@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +8,10 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const webDir = path.join(rootDir, "web");
 const legacyDataPath = path.join(webDir, "data.json");
 const profilesDir = path.join(rootDir, "profiles");
+const profileInitMarker = path.join(profilesDir, ".initialized");
+const adminPath = path.join(rootDir, "admin.json");
 const defaultProfileSlug = "eston";
+const defaultAdminPassword = "Admin123!";
 const port = Number(process.env.PORT ?? 8010);
 const catalogTtlMs = 6 * 60 * 60 * 1000;
 let catalogCache = null;
@@ -80,6 +84,7 @@ async function ensureProfileStore() {
   await fs.mkdir(profilesDir, { recursive: true });
   const profileFiles = (await fs.readdir(profilesDir)).filter((file) => file.endsWith(".json"));
   if (profileFiles.length) return;
+  if (await fileExists(profileInitMarker)) return;
 
   const defaultPath = profilePath(defaultProfileSlug);
 
@@ -93,6 +98,7 @@ async function ensureProfileStore() {
   });
   delete next.rows;
   await fs.writeFile(defaultPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await fs.writeFile(profileInitMarker, new Date().toISOString(), "utf8");
 }
 
 async function readData(slug = defaultProfileSlug) {
@@ -119,6 +125,7 @@ async function writeData(data, slug = defaultProfileSlug) {
     },
   };
   await fs.writeFile(profilePath(safeSlug), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await fs.writeFile(profileInitMarker, new Date().toISOString(), "utf8");
 }
 
 function calculateData(data) {
@@ -250,6 +257,56 @@ async function renameProfile(oldSlug, { name, slug }) {
     updatedAt: nextData.updatedAt,
     url: `/${encodeURIComponent(nextSlug)}`,
   };
+}
+
+function makeHttpError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function hashPassword(password, salt = randomBytes(16).toString("hex"), iterations = 120000) {
+  const hash = pbkdf2Sync(String(password), salt, iterations, 32, "sha256").toString("hex");
+  return { salt, iterations, hash };
+}
+
+async function ensureAdminStore() {
+  if (await fileExists(adminPath)) return;
+  const credential = hashPassword(defaultAdminPassword);
+  await fs.writeFile(adminPath, `${JSON.stringify({ ...credential, updatedAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
+}
+
+async function verifyAdminPassword(password) {
+  await ensureAdminStore();
+  const credential = JSON.parse(await fs.readFile(adminPath, "utf8"));
+  const candidate = pbkdf2Sync(String(password ?? ""), credential.salt, credential.iterations, 32, "sha256");
+  const expected = Buffer.from(credential.hash, "hex");
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
+async function requireAdmin(password) {
+  if (!(await verifyAdminPassword(password))) {
+    throw makeHttpError("Invalid admin password", 401);
+  }
+}
+
+async function changeAdminPassword({ password, newPassword }) {
+  await requireAdmin(password);
+  const cleanNewPassword = String(newPassword ?? "");
+  if (cleanNewPassword.length < 8) throw makeHttpError("New password must be at least 8 characters", 400);
+  const credential = hashPassword(cleanNewPassword);
+  await fs.writeFile(adminPath, `${JSON.stringify({ ...credential, updatedAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
+  return { ok: true };
+}
+
+async function deleteProfile(slug) {
+  await ensureProfileStore();
+  const safeSlug = slugifyProfile(slug);
+  if (!safeSlug) throw makeHttpError("Profile slug is invalid", 400);
+  const target = profilePath(safeSlug);
+  if (!(await fileExists(target))) throw makeHttpError(`Profile not found: ${safeSlug}`, 404);
+  await fs.unlink(target);
+  return { ok: true, slug: safeSlug };
 }
 
 // --- Finnomena NAV fetcher ---
@@ -439,9 +496,12 @@ function sendJson(response, statusCode, payload) {
 
 async function serveStatic(request, response, url) {
   const pathname = decodeURIComponent(url.pathname);
+  const isAdminRoute = pathname === "/admin" || pathname === "/admin/";
   const isProfileRoute = /^\/[^/.]+\/?$/.test(pathname) && pathname !== "/api";
   const requestPath = pathname === "/"
     ? "/index.html"
+    : isAdminRoute
+      ? "/admin.html"
     : isProfileRoute
       ? "/profile.html"
       : pathname;
@@ -468,10 +528,49 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   const profileMatch = url.pathname.match(/^\/api\/profiles\/([^/]+)\/(data|refresh-nav|holdings|funds)$/);
   const profileRootMatch = url.pathname.match(/^\/api\/profiles\/([^/]+)$/);
+  const adminProfileMatch = url.pathname.match(/^\/api\/admin\/profiles\/([^/]+)$/);
   const profileSlug = profileMatch ? slugifyProfile(decodeURIComponent(profileMatch[1])) : defaultProfileSlug;
   const profileAction = profileMatch?.[2] ?? null;
 
   try {
+    // POST /api/admin/verify — verify admin password for admin page access
+    if (request.method === "POST" && url.pathname === "/api/admin/verify") {
+      const body = await readJsonBody(request);
+      await requireAdmin(body.password);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    // PATCH /api/admin/password — change admin password
+    if (request.method === "PATCH" && url.pathname === "/api/admin/password") {
+      sendJson(response, 200, await changeAdminPassword(await readJsonBody(request)));
+      return;
+    }
+
+    // POST /api/admin/profiles — admin-only create profile
+    if (request.method === "POST" && url.pathname === "/api/admin/profiles") {
+      const body = await readJsonBody(request);
+      await requireAdmin(body.password);
+      sendJson(response, 201, await createProfile(body));
+      return;
+    }
+
+    // PATCH /api/admin/profiles/:slug — admin-only rename profile
+    if (request.method === "PATCH" && adminProfileMatch) {
+      const body = await readJsonBody(request);
+      await requireAdmin(body.password);
+      sendJson(response, 200, await renameProfile(decodeURIComponent(adminProfileMatch[1]), body));
+      return;
+    }
+
+    // DELETE /api/admin/profiles/:slug — admin-only delete profile
+    if (request.method === "DELETE" && adminProfileMatch) {
+      const body = await readJsonBody(request);
+      await requireAdmin(body.password);
+      sendJson(response, 200, await deleteProfile(decodeURIComponent(adminProfileMatch[1])));
+      return;
+    }
+
     // GET /api/profiles — list available isolated portfolios
     if (request.method === "GET" && url.pathname === "/api/profiles") {
       sendJson(response, 200, { profiles: await listProfiles() });
@@ -481,6 +580,7 @@ const server = createServer(async (request, response) => {
     // POST /api/profiles — create an empty independent portfolio
     if (request.method === "POST" && url.pathname === "/api/profiles") {
       const body = await readJsonBody(request);
+      await requireAdmin(body.password);
       sendJson(response, 201, await createProfile(body));
       return;
     }
@@ -488,6 +588,7 @@ const server = createServer(async (request, response) => {
     // PATCH /api/profiles/:slug — rename profile and move its backing data file
     if (request.method === "PATCH" && profileRootMatch) {
       const body = await readJsonBody(request);
+      await requireAdmin(body.password);
       sendJson(response, 200, await renameProfile(decodeURIComponent(profileRootMatch[1]), body));
       return;
     }
@@ -570,11 +671,12 @@ const server = createServer(async (request, response) => {
 
     await serveStatic(request, response, url);
   } catch (error) {
-    sendJson(response, 500, { error: error.message });
+    sendJson(response, error.statusCode ?? 500, { error: error.message });
   }
 });
 
 await ensureProfileStore();
+await ensureAdminStore();
 
 server.listen(port, "127.0.0.1", () => {
   console.log(`MyFund web app: http://127.0.0.1:${port}/`);

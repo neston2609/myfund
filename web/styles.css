@@ -486,6 +486,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent) !importan
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 20px; padding: 18px;
   color: var(--text);
+  text-decoration: none;
   box-shadow: 0 6px 24px rgba(0,0,0,.04);
   transition: transform .12s, box-shadow .12s, border-color .12s;
 }
@@ -507,6 +508,29 @@ input:focus, select:focus { outline: none; border-color: var(--accent) !importan
 .positive-text { color: var(--pos); }
 .negative-text { color: var(--neg); }
 
+/* ── Admin ── */
+.admin-panel { flex-direction: column; gap: 22px; }
+.admin-login,
+.admin-password-form {
+  display: grid; grid-template-columns: minmax(240px, 1fr) auto;
+  gap: 12px; align-items: end;
+}
+.admin-profile-list { display: flex; flex-direction: column; gap: 10px; }
+.admin-profile-row {
+  display: grid; grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 12px; align-items: center;
+  padding: 12px; border: 1px solid var(--border);
+  border-radius: 14px; background: var(--bg);
+}
+.admin-profile-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.admin-profile-name-input {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text);
+  font-weight: 800; font-size: 15px;
+}
+.admin-profile-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .charts-grid { grid-template-columns: 1fr; }
@@ -518,6 +542,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent) !importan
   .hero-value { font-size: 32px; }
   .app { padding: 18px 14px 60px; gap: 16px; }
   .profile-create { grid-template-columns: 1fr; }
+  .admin-login,
+  .admin-password-form,
+  .admin-profile-row { grid-template-columns: 1fr; }
+  .admin-profile-actions { justify-content: stretch; }
+  .admin-profile-actions > * { flex: 1; text-align: center; }
   .field-row { grid-template-columns: 1fr; }
   .modal { max-height: calc(100vh - 28px); overflow: auto; }
   .modal-foot { flex-direction: column; align-items: stretch; }

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyFund · Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="theme-grape">
+  <main class="app profile-home">
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="brand-icon">฿</div>
+        <div>
+          <div class="brand-title">MyFund <span class="brand-sub">· Admin</span></div>
+          <div class="brand-desc">จัดการ profile และรหัสผ่านผู้ดูแลระบบ</div>
+        </div>
+      </div>
+      <a class="btn-outline nav-link" href="/">Profiles</a>
+    </header>
+
+    <section class="card" id="login-card">
+      <div class="section-title">เข้าสู่หน้า Admin · Admin login</div>
+      <form class="admin-login" id="admin-login-form">
+        <div class="field">
+          <label>Admin password</label>
+          <input id="admin-password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn-primary" type="submit">เข้าสู่ระบบ Login</button>
+      </form>
+    </section>
+
+    <section class="admin-panel" id="admin-panel" style="display:none;">
+      <div class="card">
+        <div class="section-title">เพิ่ม Profile · Add profile</div>
+        <form class="profile-create" id="admin-create-form">
+          <div class="field">
+            <label>ชื่อ Profile · Profile name</label>
+            <input id="admin-profile-name" type="text" autocomplete="off" required>
+          </div>
+          <button class="btn-primary" type="submit">+ เพิ่ม Profile</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="section-title">จัดการ Profile · Manage profiles</div>
+        <div class="admin-profile-list" id="admin-profile-list">กำลังโหลด · Loading</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">เปลี่ยน Admin Password · Change password</div>
+        <form class="admin-password-form" id="admin-password-form">
+          <div class="field">
+            <label>รหัสผ่านปัจจุบัน · Current password</label>
+            <input id="current-admin-password" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="field">
+            <label>รหัสผ่านใหม่ · New password</label>
+            <input id="new-admin-password" type="password" autocomplete="new-password" minlength="8" required>
+          </div>
+          <button class="btn-save" type="submit">เปลี่ยนรหัสผ่าน</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="delete-backdrop" style="display:none;">
+    <div class="modal profile-rename-modal">
+      <div class="modal-head">
+        <div class="modal-title">ลบ Profile · Delete profile</div>
+        <button class="btn-icon" id="delete-close" type="button">✕</button>
+      </div>
+      <form id="delete-form">
+        <div class="modal-body">
+          <div class="field-hint" id="delete-hint"></div>
+          <div class="field">
+            <label>ใส่ Admin password เพื่อยืนยัน · Admin password</label>
+            <input id="delete-password" type="password" autocomplete="current-password" required>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-cancel" id="delete-cancel" type="button">ยกเลิก Cancel</button>
+          <div class="modal-foot-right">
+            <button class="btn-danger" type="submit">ลบ Profile</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" style="display:none;"></div>
+  <script src="/admin.js"></script>
+</body>
+</html>
